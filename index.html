@@ -739,13 +739,13 @@ function nowDateTime() { return fmtDate(); }
               </div>
               <!-- Group selector — hidden when product has no groups -->
               <div id="pi-group-wrap" style="display:none;">
-                <label class="form-label">Group</label>
+                <label class="form-label">Group *</label>
                 <select id="pi-group" class="form-input" onchange="handleGroupChange()">
                   <option value="">— Select Group —</option>
                 </select>
               </div>
               <div style="position:relative;">
-                <label class="form-label">Shade / Colour</label>
+                <label class="form-label">Shade / Colour *</label>
                 <input type="text" id="pi-shade" class="form-input" placeholder="Select product first…" autocomplete="off"
                   oninput="filterShadeDropdown(this.value)" onfocus="showShadeDropdown()" onblur="setTimeout(()=>hideShadeDropdown(),180)" />
                 <div id="pi-shade-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid var(--saffron);border-top:none;border-radius:0 0 8px 8px;max-height:220px;overflow-y:auto;z-index:200;box-shadow:0 8px 20px rgba(0,0,0,0.1);"></div>
@@ -1064,7 +1064,11 @@ function nowDateTime() { return fmtDate(); }
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn btn-outline btn-sm" onclick="exportSPReport()">
             <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Export CSV
+            Export All CSV
+          </button>
+          <button class="btn btn-outline btn-sm" onclick="exportSPReportBySP()">
+            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export SP-Wise
           </button>
           <button class="btn btn-primary btn-sm" onclick="renderSPReport()">
             <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.8"/></svg>
@@ -4534,6 +4538,14 @@ function generatePI() {
   if (!client || !productEl.value || !dpl) {
     showToast('Please fill in Client, Product, and DPL Rate.', 'error'); return;
   }
+  if (!shade) {
+    showToast('Shade / Colour is required.', 'error'); return;
+  }
+  const groupWrap = document.getElementById('pi-group-wrap');
+  if (groupWrap && groupWrap.style.display !== 'none') {
+    const groupVal = document.getElementById('pi-group')?.value || '';
+    if (!groupVal) { showToast('Please select a Group.', 'error'); return; }
+  }
   if (finalRateText === '₹ —') {
     showToast('Please calculate price first.', 'error'); return;
   }
@@ -4656,6 +4668,7 @@ function generatePI() {
 
   document.getElementById('pi-content').innerHTML = html;
   document.getElementById('pi-modal').classList.add('open');
+  if (typeof _generatePISuccess !== 'undefined') _generatePISuccess = true;
 }
 
 function closePIModal() {
@@ -5178,7 +5191,7 @@ function addExtraProductRow() {
       </div>
       <div>
         <label class="form-label" style="font-size:10px;">Pack *</label>
-        <select id="xp-pack-${id}" class="form-input" style="font-size:13px;" onchange="xpAutoFillRate(${id})">${packOpts}</select>
+        <select id="xp-pack-${id}" class="form-input" style="font-size:13px;" onchange="xpAutoFillRate(${id});xpCalcAmount(${id})">${packOpts}</select>
       </div>
       <div>
         <label class="form-label" style="font-size:10px;">Qty *</label>
@@ -5198,8 +5211,9 @@ function addExtraProductRow() {
         <option value="">— Select Group —</option>
       </select>
     </div>
-    <div style="margin-top:8px;display:flex;justify-content:flex-end;align-items:center;gap:8px;">
+    <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
       <span id="xp-fixed-notice-${id}" style="display:none;font-size:11px;background:#FDECEA;color:var(--red-accent);border-radius:5px;padding:2px 8px;">Fixed Price — no discounts</span>
+      <span style="font-size:12px;color:var(--ink-soft);background:var(--stone-light);border-radius:6px;padding:5px 10px;">Total Vol/Wt: <b id="xp-total-ltr-${id}">—</b></span>
       <span style="font-size:11.5px;color:var(--ink-muted);">Final Rate: <b id="xp-finalrate-${id}">—</b> &nbsp;|&nbsp; Amount: <b id="xp-amount-${id}" style="color:var(--saffron);">—</b></span>
     </div>`;
   container.appendChild(row);
@@ -5372,10 +5386,12 @@ function xpCalcAmount(id) {
   const qty        = parseFloat(document.getElementById('xp-qty-' + id)?.value) || 0;
   const finalRateEl = document.getElementById('xp-finalrate-' + id);
   const amountEl    = document.getElementById('xp-amount-' + id);
+  const ltrEl       = document.getElementById('xp-total-ltr-' + id);
 
   if (!dplVal) {
     if (finalRateEl) finalRateEl.textContent = '—';
     if (amountEl)    amountEl.textContent    = '—';
+    if (ltrEl)       ltrEl.textContent       = '—';
     return;
   }
 
@@ -5383,8 +5399,16 @@ function xpCalcAmount(id) {
   const price = Math.max(0, dplVal);
   const amount = price * qty;
 
+  // Compute total litres/kg for this row
+  const packSel = document.getElementById('xp-pack-' + id);
+  const packVal = packSel?.value || '';
+  const [packSize, unit] = (packVal || '').split('|');
+  const totalVol = (parseFloat(packSize) || 0) * qty;
+  const unitLabel = unit || 'L';
+
   if (finalRateEl) finalRateEl.textContent = '₹' + price.toFixed(2);
   if (amountEl)    amountEl.textContent    = qty ? '₹' + amount.toLocaleString('en-IN', {minimumFractionDigits:2}) : '—';
+  if (ltrEl)       ltrEl.textContent       = (qty && packSize) ? `${qty} Pcs | ${totalVol.toFixed(2)} ${unitLabel}` : '—';
 }
 
 // ── Extra-row shade dropdown functions ──────────────────────────────────────
@@ -5523,6 +5547,14 @@ function saveOrder() {
   if (!client || !productEl.value || !qty || finalRateText === '₹ —') {
     showToast('Please complete all required fields and calculate price.', 'error'); return;
   }
+  if (!shade) {
+    showToast('Shade / Colour is required.', 'error'); return;
+  }
+  const _groupWrapSave = document.getElementById('pi-group-wrap');
+  if (_groupWrapSave && _groupWrapSave.style.display !== 'none') {
+    const _groupValSave = document.getElementById('pi-group')?.value || '';
+    if (!_groupValSave) { showToast('Please select a Group.', 'error'); return; }
+  }
 
   const finalRate = parseFloat(finalRateText.replace('₹ ','')) || 0;
   const totalAmount = parseFloat(totalText.replace(/[₹,\s]/g,'')) || 0;
@@ -5537,20 +5569,24 @@ function saveOrder() {
   const discTrade = parseFloat(document.getElementById('pi-disc-trade')?.value) || 0;
   const discLoyalty = parseFloat(document.getElementById('pi-disc-loyalty')?.value) || 0;
   const discCash = parseFloat(document.getElementById('pi-disc-cash')?.value) || 0;
-  const piDate = document.getElementById('pi-date')?.value || '';
+  const piDate = fmtDateOnly(document.getElementById('pi-date')?.value || '') || fmtDateOnly();
   const piComment = document.getElementById('pi-comment')?.value || '';
   const piOutstanding = parseFloat(document.getElementById('pi-outstanding')?.value) || 0;
   const productId = productEl.value || '';
   const group = document.getElementById('pi-group')?.value || '';
   const packVal = packEl.value || '';
 
+  // Collect extra product rows
+  const extraRows = _collectExtraRows();
+
   const order = {
     id: Date.now(),
-    date: nowDateTime(), client, sales, region, product: productText, shade, pack: packText,
+    date: piDate || nowDateTime(), client, sales, region, product: productText, shade, pack: packText,
     qty, finalRate, totalAmount,
     freightType, freight: freightAmt,
     address: piAddress, pcs, ltr,
     comment: piComment, outstanding: piOutstanding,
+    extraRows: extraRows,   // ← save extra product rows
     // Store form values for re-editing
     _formState: {
       client, sales, region, productId, shade, packVal, qty,
@@ -5600,39 +5636,79 @@ function renderOrderTable() {
     return;
   }
 
-  const rows = sessionOrders.slice().reverse().map((o, reverseIdx) => {
-    const idx = sessionOrders.length - 1 - reverseIdx;
-    return `
-    <tr>
-      <td>${o.date}</td>
-      <td style="font-weight:500;">${o.client}</td>
-      <td style="font-size:12px;max-width:160px;">${o.product}</td>
-      <td>${o.shade || '—'}</td>
-      <td>${o.pack}</td>
-      <td style="text-align:center;">${o.qty}</td>
-      <td style="text-align:right;">₹${o.finalRate.toFixed(2)}</td>
-      <td style="text-align:right;font-weight:600;color:var(--saffron);">₹${o.totalAmount.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
-      <td><span class="badge ${o.region==='bihar'?'':'badge-saffron'}" style="${o.region==='bihar'?'background:#FEF3C7;color:#92400E;':''}">${o.region==='bihar'?'Bihar/JH':'Normal'}</span></td>
-      <td style="font-size:11.5px;color:var(--ink-muted);">${o.freightType||'—'}</td>
-      <td>
-        <div style="display:flex;gap:5px;flex-wrap:wrap;">
-          <button class="btn btn-sm btn-outline" onclick="editOrderPI(${idx})" title="Edit this PI">
-            <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-            Edit PI
-          </button>
-          <button class="btn btn-sm" style="background:#8B5CF6;color:#fff;" onclick="registerOrderToFinalDB(${idx})" title="Save to Final PI Database">
-            <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>
-            Register
-          </button>
-        </div>
-      </td>
-    </tr>`;
-  }).join('');
+  // Helper: format any date string to dd-mm-yyyy hh:mm
+  function _fmtOrderDate(d) {
+    if (!d) return '—';
+    const dt = new Date(d);
+    if (isNaN(dt)) return d;
+    const dd   = String(dt.getDate()).padStart(2,'0');
+    const mm   = String(dt.getMonth()+1).padStart(2,'0');
+    const yyyy = dt.getFullYear();
+    const hh   = String(dt.getHours()).padStart(2,'0');
+    const min  = String(dt.getMinutes()).padStart(2,'0');
+    return `${dd}-${mm}-${yyyy} ${hh}:${min}`;
+  }
 
-  const table = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr><th>Date</th><th>Client</th><th>Product</th><th>Shade</th><th>Pack</th><th>Qty</th><th>Rate</th><th>Total</th><th>Region</th><th>Freight</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  let rows = '';
+  const reversed = sessionOrders.slice().reverse();
+  reversed.forEach((o, reverseIdx) => {
+    const idx = sessionOrders.length - 1 - reverseIdx;
+    const isInDB = piFinalDB.some(p =>
+      (p.customerName||'').trim().toLowerCase() === (o.client||'').trim().toLowerCase() &&
+      (p.product||'').trim().toLowerCase() === (o.product||'').trim().toLowerCase() &&
+      (p.shade||'').trim().toLowerCase() === (o.shade||'').trim().toLowerCase()
+    );
+    const dbBadge = isInDB
+      ? `<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 7px;border-radius:5px;background:var(--green-light);color:var(--green-accent);font-weight:600;">✓ In DB</span>`
+      : `<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 7px;border-radius:5px;background:#FEF3C7;color:#92400E;font-weight:600;">Not Saved</span>`;
+
+    const extraRows = o.extraRows || [];
+    const allProducts = [
+      { product: o.product, shade: o.shade || '—', pack: o.pack, qty: o.qty, rate: o.finalRate, amount: o.totalAmount, isPrimary: true },
+      ...extraRows.map(r => ({ product: r.productText || '—', shade: r.shade || '—', pack: r.packText || '—', qty: r.qty, rate: r.rate || 0, amount: r.amount || 0, isPrimary: false }))
+    ];
+    const displayDate = _fmtOrderDate(o.date);
+    const regionBadge = `<span class="badge ${o.region==='bihar'?'':'badge-saffron'}" style="${o.region==='bihar'?'background:#FEF3C7;color:#92400E;':''}">${o.region==='bihar'?'Bihar/JH':'Normal'}</span>`;
+    const actions = `<div style="display:flex;gap:5px;flex-wrap:wrap;">
+      <button class="btn btn-sm btn-outline" onclick="editOrderPI(${idx})">
+        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        Edit PI
+      </button>
+      <button class="btn btn-sm" style="background:#8B5CF6;color:#fff;" onclick="registerOrderToFinalDB(${idx})">
+        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>
+        Register
+      </button>
+    </div>`;
+
+    // Each product gets its own complete row with all columns filled
+    allProducts.forEach((p, pi) => {
+      const isFirst  = pi === 0;
+      const rowBorder = isFirst ? 'border-top:2px solid var(--stone);' : 'border-top:1px dashed var(--stone);';
+      const bgStyle   = p.isPrimary ? '' : 'background:rgba(242,235,228,0.5);';
+      const numBadge  = allProducts.length > 1
+        ? `<span style="font-size:9px;background:${p.isPrimary?'var(--saffron-pale)':'var(--stone)'};color:${p.isPrimary?'var(--saffron)':'var(--ink-muted)'};border-radius:3px;padding:1px 5px;font-weight:700;margin-right:4px;">#${pi+1}</span>`
+        : '';
+      rows += `<tr style="${rowBorder}${bgStyle}">
+        <td style="font-size:12.5px;">${displayDate}</td>
+        <td style="font-weight:500;">${o.client}</td>
+        <td style="font-size:12.5px;max-width:160px;">${numBadge}${p.product}</td>
+        <td>${p.shade}</td>
+        <td>${p.pack}</td>
+        <td style="text-align:center;">${p.qty}</td>
+        <td style="text-align:right;">₹${(p.rate||0).toFixed(2)}</td>
+        <td style="text-align:right;font-weight:600;color:var(--saffron);">₹${(p.amount||0).toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
+        <td>${regionBadge}</td>
+        <td style="font-size:11.5px;color:var(--ink-muted);">${o.freightType||'—'}</td>
+        <td>${dbBadge}</td>
+        <td>${isFirst ? actions : ''}</td>
+      </tr>`;
+    });
+  });
+
+  const table = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr><th>Date</th><th>Client</th><th>Product</th><th>Shade</th><th>Pack</th><th>Qty</th><th>Rate</th><th>Total</th><th>Region</th><th>Freight</th><th>DB Status</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   container.innerHTML = table;
 
-  // Recent 3
+  // Recent 3 (primary product of each order)
   const recentRows = sessionOrders.slice().reverse().slice(0,3).map(o => `
     <tr>
       <td>${o.client}</td>
@@ -5661,7 +5737,13 @@ function editOrderPI(idx) {
     document.getElementById('pi-region').value = fs.region || 'normal';
     handleRegionChange();
 
-    if (document.getElementById('pi-date')) document.getElementById('pi-date').value = fs.date || '';
+    if (document.getElementById('pi-date')) {
+        // fs.date is dd-mm-yyyy; input[type=date] needs yyyy-mm-dd
+        let _dv = fs.date || '';
+        const _dm = _dv.match(/^(\d{2})-(\d{2})-(\d{4})/);
+        if (_dm) _dv = _dm[3] + '-' + _dm[2] + '-' + _dm[1];
+        document.getElementById('pi-date').value = _dv;
+      }
     if (document.getElementById('pi-freight-type')) document.getElementById('pi-freight-type').value = fs.freightType || 'To Pay';
     if (document.getElementById('pi-freight')) document.getElementById('pi-freight').value = fs.freight || '';
     if (document.getElementById('pi-address')) document.getElementById('pi-address').value = fs.address || '';
@@ -5715,37 +5797,67 @@ function registerOrderToFinalDB(idx) {
   const o = sessionOrders[idx];
   if (!o) return;
 
-  // Map order to _lastGeneratedOrder format for finalizePI
+  // Build list of all products in this order (primary + extras)
+  const extraRows = o.extraRows || [];
+  const allProducts = [
+    {
+      productName: o.product,
+      productId: o._formState?.productId || '',
+      shade: o.shade,
+      packSize: o.pack,
+      packSizeRef: o._formState?.packVal || '',
+      qty: o.qty,
+      pcs: o.pcs || o.qty,
+      ltr: o.ltr || 0,
+      finalRate: o.finalRate,
+      totalAmount: o.totalAmount,
+    },
+    ...extraRows.map(r => ({
+      productName: r.productText || '',
+      productId: '',
+      shade: r.shade || '',
+      packSize: r.packText || '',
+      packSizeRef: r.packVal || '',
+      qty: r.qty,
+      pcs: r.qty,
+      ltr: r.litres || 0,
+      finalRate: r.rate || 0,
+      totalAmount: r.amount || 0,
+    }))
+  ];
+
+  // Store all products on the pending data so confirmFinalizePI can loop them
   _lastGeneratedOrder = {
-    date: o.date,
+    date: o._formState?.date || o.date,
     clientName: o.client,
     clientId: '',
     sales: o.sales,
     region: o.region,
+    address: o.address || '',
+    unit: 'L',
+    freight: o.freight || 0,
+    freightType: o.freightType || 'To Pay',
+    comment: o.comment || '',
+    outstandingAmount: o.outstanding || 0,
+    // Primary (for backward compat)
     productName: o.product,
     productId: o._formState?.productId || '',
     shade: o.shade,
     packSize: o.pack,
     packSizeRef: o._formState?.packVal || '',
-    outstandingAmount: o.outstanding || 0,
     qty: o.qty,
     pcs: o.pcs || o.qty,
     ltr: o.ltr || 0,
-    address: o.address || '',
-    unit: 'L',
     finalRate: o.finalRate,
     totalAmount: o.totalAmount,
-    freight: o.freight || 0,
-    freightType: o.freightType || 'To Pay',
-    comment: o.comment || '',
+    // All products list for multi-save
+    _allProducts: allProducts,
   };
 
-  // Pre-fill salesperson
   populateSalespersonDropdowns();
   if (_lastGeneratedOrder.sales && document.getElementById('fpi-salesperson-sel')) {
     document.getElementById('fpi-salesperson-sel').value = _lastGeneratedOrder.sales;
   }
-  // CRITICAL: set _pendingFinalPIData so confirmFinalizePI() can read it
   _pendingFinalPIData = _lastGeneratedOrder;
   document.getElementById('finalize-pi-modal').classList.add('open');
 }
@@ -5785,7 +5897,7 @@ function renderReports() {
   if (!count) { container.innerHTML = `<div style="text-align:center;padding:32px;color:var(--ink-muted);font-size:13px;">No orders to report yet.</div>`; return; }
 
   const rows = sessionOrders.map(o => `
-    <tr><td>${o.date}</td><td>${o.client}</td><td style="font-size:12px;">${o.product}</td><td>${o.qty}</td><td style="text-align:right;">₹${o.finalRate.toFixed(2)}</td><td style="text-align:right;font-weight:600;color:var(--saffron);">₹${o.totalAmount.toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>
+    <tr><td>${(function(d){if(!d)return'—';const dt=new Date(d);if(isNaN(dt))return d;return String(dt.getDate()).padStart(2,'0')+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+dt.getFullYear()+' '+String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0');})(o.date)}</td><td>${o.client}</td><td style="font-size:12px;">${o.product}</td><td>${o.qty}</td><td style="text-align:right;">₹${o.finalRate.toFixed(2)}</td><td style="text-align:right;font-weight:600;color:var(--saffron);">₹${o.totalAmount.toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>
   `).join('');
   container.innerHTML = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr><th>Date</th><th>Client</th><th>Product</th><th>Qty</th><th>Rate</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
@@ -9105,46 +9217,82 @@ function confirmFinalizePI() {
   const salesperson = document.getElementById('fpi-salesperson-sel').value;
   if (!salesperson) { showToast('Please select a salesperson before registering', 'error'); return; }
 
-  const piNum = 'PI-F-' + String(piFinalDB.length + 1).padStart(5,'0');
-  const record = {
-    id: Date.now(),
-    piNumber: piNum,
-    date: ord.date || nowDateTime(),
-    customerId: ord.clientId || ord.customerId || '',
-    customerName: ord.clientName || ord.client || ord.customerName || '',
-    address: ord.address || '',
-    product: ord.productName || ord.product || '',
-    productId: ord.productId,
-    shade: ord.shade || '',
-    packSize: ord.packSize || ord.packSizeRef || ord.pack_size || '',
-    pcs: parseFloat(ord.pcs || ord.qty || ord.quantity) || 0,
-    ltr: parseFloat(ord.ltr || ord.totalLitres) || 0,
-    quantity: parseFloat(ord.ltr || ord.totalLitres) || parseFloat(ord.qty || ord.pcs || ord.quantity) || 0,
-    unit: ord.unit || 'L',
-    salesperson,
-    price: parseFloat(ord.finalRate || ord.price) || 0,
-    totalValue: parseFloat(ord.totalAmount || ord.totalValue) || 0,
-    freight: parseFloat(ord.freight) || 0,
-    freightType: ord.freightType || 'To Pay',
-    source: 'sales',
-    comments: ord.comment || ord.comments || '',
-    createdAt: new Date().toISOString(),
-  };
+  // Helper: normalise date to dd-mm-yyyy
+  function _normDate(d) {
+    let s = d || '';
+    const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) s = iso[3] + '-' + iso[2] + '-' + iso[1];
+    const dt  = s.match(/^(\d{2}-\d{2}-\d{4})/);
+    if (dt)  s = dt[1];
+    return s || fmtDateOnly();
+  }
 
-  piFinalDB.push(record);
+  // Helper: build one piFinalDB record from product data + shared order data
+  function _buildRecord(prod, piNum) {
+    const pcs = parseFloat(prod.pcs || prod.qty) || 0;
+    const ltr = parseFloat(prod.ltr) || 0;
+    // Compute volume from packSizeRef (e.g. "20|L") or packSize display (e.g. "20 L")
+    const packRef = (prod.packSizeRef || '').trim();
+    let packVol = 0;
+    if (packRef.includes('|')) { packVol = parseFloat(packRef.split('|')[0]) || 0; }
+    else { const m = (prod.packSize||'').match(/^([\d.]+)/); packVol = m ? parseFloat(m[1]) : 0; if (/ml/i.test(prod.packSize||'')) packVol /= 1000; if (/\bgm\b|\bgrm\b/i.test(prod.packSize||'')) packVol /= 1000; }
+    const computedLtr = packVol > 0 ? pcs * packVol : pcs;
+    const trueLtr     = (ltr > 0 && ltr !== pcs) ? ltr : computedLtr;
+    return {
+      id: Date.now() + Math.random(),
+      piNumber: piNum,
+      date: _normDate(ord.date),
+      customerId: ord.clientId || ord.customerId || '',
+      customerName: ord.clientName || ord.client || ord.customerName || '',
+      address: ord.address || '',
+      product: prod.productName || prod.product || '',
+      productId: prod.productId || '',
+      shade: prod.shade || '',
+      packSize: prod.packSize || prod.packSizeRef || '',
+      packSizeRef: prod.packSizeRef || '',
+      pcs: pcs,
+      ltr: trueLtr,
+      quantity: trueLtr,
+      unit: ord.unit || 'L',
+      salesperson,
+      price: parseFloat(prod.finalRate || prod.price) || 0,
+      totalValue: parseFloat(prod.totalAmount || prod.totalValue) || 0,
+      freight: parseFloat(ord.freight) || 0,
+      freightType: ord.freightType || 'To Pay',
+      source: 'sales',
+      comments: ord.comment || ord.comments || '',
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  // Build records for every product in the order
+  const productsToSave = ord._allProducts && ord._allProducts.length > 0
+    ? ord._allProducts
+    : [ord];  // fallback: single product (legacy / direct PI generate)
+
+  const savedRecords = [];
+  productsToSave.forEach(function(prod, i) {
+    const piNum = 'PI-F-' + String(piFinalDB.length + 1 + i).padStart(5,'0');
+    const record = _buildRecord(prod, piNum);
+    piFinalDB.push(record);
+    savedRecords.push(record);
+  });
+
   savePiFinalDB();
   document.getElementById('finalize-pi-modal').classList.remove('open');
   updateFinalPIStats();
   renderFinalPITable();
-  showToast('✅ PI Registered! PI#: ' + piNum, 'success');
+  renderOrderTable();
+  const count = savedRecords.length;
+  showToast('✅ ' + count + ' product' + (count > 1 ? 's' : '') + ' registered to Final PI DB!', 'success');
   _pendingFinalPIData = null;
-  // Sync to Google Sheets (non-blocking)
-  _sheetsPost('saveFinalPI', { data: record })
-    .then(function(res) {
-      if (res && res.success) showToast('☁️ Synced to Google Sheets ✓', 'success');
-      else console.warn('saveFinalPI sheets sync issue:', res);
-    })
-    .catch(function(err) { console.warn('saveFinalPI sheets error:', err); });
+
+  // Sync all records to Google Sheets
+  savedRecords.forEach(function(record) {
+    _sheetsPost('saveFinalPI', { data: record })
+      .then(function(res) { if (res && res.success) console.log('Synced PI#', record.piNumber); })
+      .catch(function(err) { console.warn('saveFinalPI sheets error:', err); });
+  });
 }
 
 function renderFinalPITable() {
@@ -9992,16 +10140,19 @@ window.showPage = function(page) {
 // TRACK LAST GENERATED ORDER for Finalize PI button
 // ═══════════════════════════════════════════════════════════
 let _lastGeneratedOrder = null;
+let _generatePISuccess = false;  // flag set by original generatePI on success
 const _origGeneratePI = typeof generatePI === 'function' ? generatePI : null;
 if (_origGeneratePI) {
   window.generatePI = function() {
+    _generatePISuccess = false;
     _origGeneratePI();
+    if (!_generatePISuccess) return;  // validation failed — do not capture order
     // Capture current PI form values
     const getVal = id => document.getElementById(id)?.value || '';
     const packEl = document.getElementById('pi-pack');
     const packSizeVal = packEl ? (packEl.options[packEl.selectedIndex]?.text || packEl.value || '') : '';
     _lastGeneratedOrder = {
-      date: getVal('pi-date'),
+      date: fmtDateOnly(getVal('pi-date')) || fmtDateOnly(),
       clientName: getVal('pi-client-name') || getVal('pi-client'),
       clientId: getVal('pi-client-id') || '',
       sales: getVal('pi-sales'),
@@ -10025,7 +10176,7 @@ if (_origGeneratePI) {
       dpl: parseFloat(getVal('pi-dpl')) || 0,
       discPerLitre: parseFloat(getVal('pi-disc-per-litre')) || 0,
       discTrade: parseFloat(getVal('pi-disc-trade')) || 0,
-      discLoyalty: parseFloat(getVal('pi-disc-loyalty')) || 0,
+      discLoyalty: parseFloat(getVal('pi-disc-cash')) || 0,
       discCash: parseFloat(getVal('pi-disc-cash')) || 0,
       group: getVal('pi-group'),
     };
@@ -11062,8 +11213,9 @@ function renderSPTable(data, topKeys, keyOf, container, showRank) {
   const agg = {};
   data.forEach(r => {
     const { prod, shade, pack, key } = keyOf(r);
-    if (!agg[key]) agg[key] = { prod, shade, pack, key, qty: 0, orders: 0 };
+    if (!agg[key]) agg[key] = { prod, shade, pack, key, qty: 0, pcs: 0, orders: 0 };
     agg[key].qty += (parseFloat(r.qty) || 0);
+    agg[key].pcs += (parseFloat(r.pcs) || parseFloat(r.quantity) || 0);
     agg[key].orders += 1;
   });
   const rows = Object.values(agg).sort((a,b) => b.qty - a.qty);
@@ -11073,17 +11225,6 @@ function renderSPTable(data, topKeys, keyOf, container, showRank) {
   }
 
   const maxQty = rows[0].qty;
-  let html = `<table class="data-table" style="min-width:600px;">
-    <thead><tr>
-      ${showRank ? '<th style="width:44px;">Rank</th>' : ''}
-      <th>Product</th>
-      <th>Shade</th>
-      <th>Pack Size</th>
-      <th style="text-align:right;">Orders</th>
-      <th style="text-align:right;">Total Qty</th>
-      <th style="width:160px;">Volume Bar</th>
-    </tr></thead><tbody>`;
-
   rows.forEach((row, i) => {
     const isTop = topKeys.has(row.key);
     const rank = i + 1;
@@ -11099,6 +11240,7 @@ function renderSPTable(data, topKeys, keyOf, container, showRank) {
       <td>${row.shade}</td>
       <td><span style="background:var(--stone-light);padding:2px 8px;border-radius:5px;font-size:12px;">${row.pack}</span></td>
       <td style="text-align:right;color:var(--ink-muted);font-size:13px;">${row.orders}</td>
+      <td style="text-align:right;font-size:13px;color:var(--ink-soft);">${row.pcs > 0 ? row.pcs.toLocaleString('en-IN',{maximumFractionDigits:0}) : '—'}</td>
       <td style="text-align:right;font-weight:600;font-size:15px;">${row.qty.toLocaleString('en-IN',{maximumFractionDigits:1})}</td>
       <td>
         <div style="background:var(--stone-light);border-radius:4px;height:8px;overflow:hidden;">
@@ -12298,7 +12440,15 @@ function renderSPReport() {
 
   // KPIs
   const uniqueSPs = new Set(data.map(r => r.salesperson||'Unassigned')).size;
-  const totalQty = data.reduce((s,r) => s + (parseFloat(r.quantity)||0), 0);
+  const totalQty = data.reduce((s,r) => {
+    const pcs = parseFloat(r.pcs || r.qty) || parseFloat(r.quantity) || 0;
+    const packRef = (r.packSizeRef || '').trim();
+    let packVol = 0;
+    if (packRef && packRef.includes('|')) { packVol = parseFloat(packRef.split('|')[0]) || 0; }
+    else { const m = (r.packSize||r.pack_size||'').match(/^([\d.]+)/); packVol = m ? parseFloat(m[1]) : 0; if (/ml/i.test(r.packSize||'')) packVol /= 1000; if (/gm|grm/i.test(r.packSize||'')) packVol /= 1000; }
+    const storedLtr = parseFloat(r.ltr) || 0;
+    return s + ((storedLtr > 0 && storedLtr !== pcs) ? storedLtr : (packVol > 0 ? pcs * packVol : pcs));
+  }, 0);
   const totalRev = data.reduce((s,r) => s + (parseFloat(r.totalValue)||0), 0);
   const el = id => document.getElementById(id);
   if (el('spr-stat-sp')) el('spr-stat-sp').textContent = uniqueSPs;
@@ -12324,10 +12474,10 @@ function renderSPReport() {
     bySP[sp].push(r);
   });
 
-  // Sort SPs by total qty desc
+  // Sort SPs by total ltr desc
   const spList = Object.entries(bySP).sort((a,b) => {
-    const qa = a[1].reduce((s,r)=>s+(parseFloat(r.quantity)||0),0);
-    const qb = b[1].reduce((s,r)=>s+(parseFloat(r.quantity)||0),0);
+    const qa = a[1].reduce((s,r)=>s+(function(r){ const pcs=parseFloat(r.pcs||r.qty)||parseFloat(r.quantity)||0; const packRef=(r.packSizeRef||'').trim(); let pv=0; if(packRef&&packRef.includes('|')){pv=parseFloat(packRef.split('|')[0])||0;}else{const m=(r.packSize||r.pack_size||'').match(/^([\d.]+)/);pv=m?parseFloat(m[1]):0;if(/ml/i.test(r.packSize||''))pv/=1000;if(/\bgm\b|\bgrm\b/i.test(r.packSize||''))pv/=1000;} const sl=parseFloat(r.ltr)||0; return(sl>0&&sl!==pcs)?sl:(pv>0?pcs*pv:pcs); })(r),0);
+    const qb = b[1].reduce((s,r)=>s+(function(r){ const pcs=parseFloat(r.pcs||r.qty)||parseFloat(r.quantity)||0; const packRef=(r.packSizeRef||'').trim(); let pv=0; if(packRef&&packRef.includes('|')){pv=parseFloat(packRef.split('|')[0])||0;}else{const m=(r.packSize||r.pack_size||'').match(/^([\d.]+)/);pv=m?parseFloat(m[1]):0;if(/ml/i.test(r.packSize||''))pv/=1000;if(/\bgm\b|\bgrm\b/i.test(r.packSize||''))pv/=1000;} const sl=parseFloat(r.ltr)||0; return(sl>0&&sl!==pcs)?sl:(pv>0?pcs*pv:pcs); })(r),0);
     return qb - qa;
   });
 
@@ -12335,7 +12485,7 @@ function renderSPReport() {
   let html = '';
 
   spList.forEach(([sp, records], spIdx) => {
-    const spTotalQty = records.reduce((s,r)=>s+(parseFloat(r.quantity)||0),0);
+    const spTotalQty = records.reduce((s,r)=>s+(function(r){ const pcs=parseFloat(r.pcs||r.qty)||parseFloat(r.quantity)||0; const packRef=(r.packSizeRef||'').trim(); let pv=0; if(packRef&&packRef.includes('|')){pv=parseFloat(packRef.split('|')[0])||0;}else{const m=(r.packSize||r.pack_size||'').match(/^([\d.]+)/);pv=m?parseFloat(m[1]):0;if(/ml/i.test(r.packSize||''))pv/=1000;if(/\bgm\b|\bgrm\b/i.test(r.packSize||''))pv/=1000;} const sl=parseFloat(r.ltr)||0; return(sl>0&&sl!==pcs)?sl:(pv>0?pcs*pv:pcs); })(r),0);
     const spTotalRev = records.reduce((s,r)=>s+(parseFloat(r.totalValue)||0),0);
     const spPIs = records.length;
 
@@ -12358,17 +12508,35 @@ function renderSPReport() {
           piCount: 0
         };
       }
-      const qty = parseFloat(r.quantity) || 0;
-      agg[key].qty += qty;
-      // Total litres: quantity * pack size in litres (if unit is L, else same)
-      const unit = (r.unit || 'L').trim();
-      agg[key].totalLtr += (unit === 'L' || unit === 'l' || unit === 'Ltr' || unit === 'ltr') ? qty : qty;
+      // pcs = number of pieces ordered (stored in r.pcs; r.qty is also pcs)
+      const pcs = parseFloat(r.pcs || r.qty) || parseFloat(r.quantity) || 0;
+      agg[key].qty += pcs;
+
+      // Compute volume = pcs × packVol. Parse packSize display string e.g. "20 L", "35 kg", "500 ml", "1.5 kg"
+      // Also handle packSizeRef format "20|L", "4|L", "0.5|L", "35|kg"
+      const packRef = (r.packSizeRef || '').trim();
+      let packVol = 0;
+      if (packRef && packRef.includes('|')) {
+        packVol = parseFloat(packRef.split('|')[0]) || 0;
+      } else {
+        // Parse display string: leading number before unit
+        const m = pack.match(/^([\d.]+)/);
+        packVol = m ? parseFloat(m[1]) : 0;
+        // Handle ml → convert to L
+        if (/ml/i.test(pack)) packVol = packVol / 1000;
+        // Handle gm/grams → convert to kg
+        if (/gm|grm|grams?/i.test(pack)) packVol = packVol / 1000;
+      }
+      // If stored ltr is valid (>0 and not equal to raw pcs), trust it; otherwise compute
+      const storedLtr = parseFloat(r.ltr) || 0;
+      const computedVol = packVol > 0 ? pcs * packVol : pcs;
+      agg[key].totalLtr += (storedLtr > 0 && storedLtr !== pcs) ? storedLtr : computedVol;
       agg[key].totalValue += parseFloat(r.totalValue) || 0;
       agg[key].piCount += 1;
     });
 
-    const aggRows = Object.values(agg).sort((a,b) => b.qty - a.qty);
-    const maxQty = aggRows.length ? aggRows[0].qty : 1;
+    const aggRows = Object.values(agg).sort((a,b) => b.totalLtr - a.totalLtr);
+    const maxLtr = aggRows.length ? aggRows[0].totalLtr : 1;
 
     // SP color (cycle through palette)
     const spColors = ['var(--saffron)','var(--green-accent)','#3B82F6','#8B5CF6','#F59E0B','#EC4899','#14B8A6','#EF4444'];
@@ -12408,9 +12576,8 @@ function renderSPReport() {
               <th>Product</th>
               <th>Shade / Colour</th>
               <th>Pack Size</th>
-              <th>Category</th>
               <th style="text-align:right;">No. of PIs</th>
-              <th style="text-align:right;">Total Qty</th>
+              <th style="text-align:right;">Qty / Pcs</th>
               <th style="text-align:right;">Total Ltr/KG</th>
               <th style="text-align:right;">Revenue (₹)</th>
               <th style="width:120px;">Volume</th>
@@ -12418,7 +12585,7 @@ function renderSPReport() {
           </thead>
           <tbody>
           ${aggRows.map((row,i) => {
-            const barPct = maxQty > 0 ? (row.qty / maxQty * 100).toFixed(1) : 0;
+            const barPct = maxLtr > 0 ? (row.totalLtr / maxLtr * 100).toFixed(1) : 0;
             const catColor = catColors[row.category] || 'var(--ink-muted)';
             return `<tr>
               <td style="color:var(--ink-muted);font-size:12px;">${i+1}</td>
@@ -12431,9 +12598,6 @@ function renderSPReport() {
               </td>
               <td>
                 <span style="background:var(--stone-light);padding:2px 8px;border-radius:5px;font-size:12px;font-family:monospace;">${row.packSize}</span>
-              </td>
-              <td>
-                ${row.category ? `<span class="badge" style="background:${catColor}22;color:${catColor};font-size:10.5px;text-transform:capitalize;">${row.category}</span>` : '<span style="color:var(--stone);">—</span>'}
               </td>
               <td style="text-align:right;color:var(--ink-muted);font-size:13px;">${row.piCount}</td>
               <td style="text-align:right;font-weight:700;font-size:14px;">${row.qty.toLocaleString('en-IN',{maximumFractionDigits:2})}</td>
@@ -12451,9 +12615,9 @@ function renderSPReport() {
           <!-- Subtotal row -->
           <tfoot>
             <tr style="background:var(--stone-light);font-weight:700;border-top:2px solid var(--stone);">
-              <td colspan="6" style="padding:10px 14px;font-size:12px;color:var(--ink-muted);text-align:right;">SUBTOTAL — ${sp}</td>
-              <td style="text-align:right;color:${spColor};font-size:15px;padding:10px 14px;">${spTotalQty.toLocaleString('en-IN',{maximumFractionDigits:1})}</td>
-              <td style="text-align:right;color:var(--green-accent);font-size:15px;padding:10px 14px;">${spTotalQty.toLocaleString('en-IN',{maximumFractionDigits:1})}</td>
+              <td colspan="5" style="padding:10px 14px;font-size:12px;color:var(--ink-muted);text-align:right;">SUBTOTAL — ${sp}</td>
+              <td style="text-align:right;color:${spColor};font-size:15px;padding:10px 14px;">${aggRows.reduce((s,r)=>s+r.qty,0).toLocaleString('en-IN',{maximumFractionDigits:1})}</td>
+              <td style="text-align:right;color:var(--green-accent);font-size:15px;padding:10px 14px;">${aggRows.reduce((s,r)=>s+r.totalLtr,0).toLocaleString('en-IN',{maximumFractionDigits:1})}</td>
               <td style="text-align:right;font-size:14px;padding:10px 14px;">₹${spTotalRev.toLocaleString('en-IN',{maximumFractionDigits:0})}</td>
               <td></td>
             </tr>
@@ -12539,6 +12703,69 @@ function exportSPReport() {
 }
 
 // (showPage hooks already registered above)
+
+function exportSPReportBySP() {
+  if (!piFinalDB.length) { showToast('No data to export', 'error'); return; }
+  const filterSP = document.getElementById('spr-filter-sp')?.value || '';
+  const filterProduct = document.getElementById('spr-filter-product')?.value || '';
+  const filterMonth = document.getElementById('spr-filter-month')?.value || '';
+  const filterYear = document.getElementById('spr-filter-year')?.value || '';
+
+  let data = piFinalDB.filter(r => {
+    if (filterSP && (r.salesperson||'') !== filterSP) return false;
+    if (filterProduct && (r.product||'') !== filterProduct) return false;
+    if (filterMonth || filterYear) {
+      const dt = parseSPRDate(r.date || r.createdAt);
+      if (!dt) return false;
+      if (filterMonth && (dt.getMonth()+1) !== parseInt(filterMonth)) return false;
+      if (filterYear && String(dt.getFullYear()) !== filterYear) return false;
+    }
+    return true;
+  });
+
+  if (!data.length) { showToast('No records match filters', 'error'); return; }
+
+  // Group by salesperson
+  const bySP = {};
+  data.forEach(r => {
+    const sp = (r.salesperson||'Unassigned').trim()||'Unassigned';
+    if (!bySP[sp]) bySP[sp] = [];
+    bySP[sp].push(r);
+  });
+
+  const headers = ['Salesperson','Product','Shade','Pack Size','Qty / Pcs','Total Ltr/KG','Revenue (INR)'];
+  const csvRows = [headers];
+
+  Object.entries(bySP).sort().forEach(([sp, records]) => {
+    const agg = {};
+    records.forEach(r => {
+      const prod = (r.product||'—').trim();
+      const shade = (r.shade||'—').trim()||'—';
+      const pack = (r.packSize||r.pack_size||r.unit||'—').trim()||'—';
+      const key = `${prod}||${shade}||${pack}`;
+      if (!agg[key]) agg[key] = { prod, shade, pack, qty:0, totalLtr:0, rev:0 };
+      const qty = parseFloat(r.pcs||r.quantity) || 0;
+      const ltr = parseFloat(r.ltr) || qty;
+      agg[key].qty  += qty;
+      agg[key].totalLtr += ltr;
+      agg[key].rev  += parseFloat(r.totalValue)||0;
+    });
+    const aggRows = Object.values(agg).sort((a,b) => b.qty - a.qty);
+    aggRows.forEach(row => {
+      csvRows.push([sp, row.prod, row.shade, row.pack, row.qty.toFixed(2), row.totalLtr.toFixed(2), row.rev.toFixed(0)]);
+    });
+    // Subtotal
+    csvRows.push([`--- TOTAL: ${sp} ---`, '', '', '',
+      aggRows.reduce((s,r)=>s+r.qty,0).toFixed(2),
+      aggRows.reduce((s,r)=>s+r.totalLtr,0).toFixed(2),
+      aggRows.reduce((s,r)=>s+r.rev,0).toFixed(0)]);
+    csvRows.push([]); // blank row separator
+  });
+
+  const spName = filterSP ? ('_' + filterSP.replace(/\s+/g,'_')) : '_all';
+  downloadCSV(csvRows, `sp_report${spName}.csv`);
+  showToast('SP-wise CSV exported!', 'success');
+}
 
 
 // ═══════════════════════════════════════════════════════════════════════
