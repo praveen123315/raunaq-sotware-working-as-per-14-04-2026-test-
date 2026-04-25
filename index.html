@@ -5420,7 +5420,7 @@ function _xpGetShades(id) {
   const pid  = parseInt(productSel.value.split('|')[0]);
   const prod = productsDB.find(p => p.id === pid);
   if (!prod) return SHADE_LIST;
-  const selectedGroup = groupSel?.value || '';
+  // Always scan ALL groups so all shades are visible regardless of selected group
   const shades = new Set();
   const priceData = window._PLS_PRICE_DATA || PRICE_DATA;
   if (priceData) {
@@ -5430,19 +5430,10 @@ function _xpGetShades(id) {
     const productEntry = resolvedKey ? sectionData[resolvedKey] : null;
     if (productEntry) {
       const scanGrp = (g) => { if (g && g.shade) g.shade.split(',').map(s=>s.trim()).filter(Boolean).forEach(s=>shades.add(s)); };
-      if (selectedGroup && productEntry[selectedGroup]) {
-        const g = productEntry[selectedGroup];
-        if (g && g.packs) { scanGrp(g); } else if (g && typeof g === 'object') { Object.values(g).forEach(scanGrp); }
-      } else if (selectedGroup) {
-        for (const grpData of Object.values(productEntry)) {
-          if (grpData && typeof grpData === 'object' && !grpData.packs && grpData[selectedGroup]) { scanGrp(grpData[selectedGroup]); break; }
-        }
-      } else {
-        Object.values(productEntry).forEach(g => {
-          if (g && g.shade) { scanGrp(g); }
-          else if (g && typeof g === 'object' && !g.packs) { Object.values(g).forEach(scanGrp); }
-        });
-      }
+      Object.values(productEntry).forEach(g => {
+        if (g && g.shade) { scanGrp(g); }
+        else if (g && typeof g === 'object' && !g.packs) { Object.values(g).forEach(scanGrp); }
+      });
     }
   }
   const dbShades = _getShadesForProduct(prod.name) || [];
@@ -5470,7 +5461,7 @@ function xpFilterShade(id, query) {
     dd.innerHTML = '<div style="padding:10px 14px;font-size:13px;color:var(--ink-muted);">No shade found — type to use custom</div>';
     dd.style.display = 'block'; return;
   }
-  dd.innerHTML = matches.slice(0, 60).map(function(s) {
+  dd.innerHTML = matches.slice(0, 200).map(function(s) {
     const safe = s.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     const hi = q ? s.replace(new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + ')', 'gi'),
       '<mark style="background:var(--saffron-pale);color:var(--saffron);font-weight:700;border-radius:2px;">$1</mark>') : s;
@@ -10581,15 +10572,39 @@ function filterShadeDropdown(query) {
   const prod = productsDB.find(p => p.id === pid);
   const productName = prod ? prod.name : '';
   const dbShades = productName ? _getShadesForProduct(productName) : [];
-  // Merged deduped list: price data first, then DB, then master list
-  const merged = [...new Set([...priceShades, ...dbShades, ...SHADE_LIST])];
+
+  // Also collect ALL shades from ALL groups of this product (not just selected group)
+  const allProductShades = [];
+  if (pid) {
+    const result = _getPIProductEntry();
+    if (result && result.entry) {
+      Object.values(result.entry).forEach(function(grp) {
+        if (grp && grp.shade) {
+          grp.shade.split(',').map(function(s){ return s.trim(); }).filter(Boolean).forEach(function(s){ allProductShades.push(s); });
+        }
+        if (grp && typeof grp === 'object' && !grp.packs && !grp.shade) {
+          Object.values(grp).forEach(function(subData) {
+            if (subData && subData.shade) {
+              subData.shade.split(',').map(function(s){ return s.trim(); }).filter(Boolean).forEach(function(s){ allProductShades.push(s); });
+            }
+          });
+        }
+      });
+    }
+  }
+
+  // Product-specific shades first, then full master list
+  const productSpecific = [...new Set([...priceShades, ...allProductShades, ...dbShades])];
+  const merged = productSpecific.length > 0
+    ? [...new Set([...productSpecific.sort(), ...SHADE_LIST])]
+    : SHADE_LIST;
   const source = merged.length > 0 ? merged : SHADE_LIST;
   const matches = q ? source.filter(s => s.toLowerCase().includes(q)) : source;
   if (!matches.length) {
     dd.innerHTML = `<div style="padding:10px 14px;font-size:13px;color:var(--ink-muted);">No shade found — type to use custom</div>`;
     dd.style.display = 'block'; return;
   }
-  dd.innerHTML = matches.slice(0, 60).map(s => {
+  dd.innerHTML = matches.slice(0, 200).map(s => {
     const safe = s.replace(/'/g, '&#39;');
     const hi = q ? s.replace(new RegExp('(' + q.replace(/[.*+?^${}()|[\\]\\]/g,'\\\\$&') + ')', 'gi'),
       '<mark style="background:var(--saffron-pale);color:var(--saffron);font-weight:700;border-radius:2px;">$1</mark>') : s;
@@ -12713,7 +12728,7 @@ function exportSPReport() {
     return true;
   });
 
-  // Aggregate
+  // Aggregate — Qty/PCS and Total Ltr/KG are SEPARATE columns
   const agg = {};
   data.forEach(r => {
     const sp = (r.salesperson||'Unassigned').trim()||'Unassigned';
@@ -12722,14 +12737,22 @@ function exportSPReport() {
     const pack = (r.packSize||r.pack_size||r.unit||'—').trim()||'—';
     const key = `${sp}||${prod}||${shade}||${pack}`;
     if (!agg[key]) agg[key] = {sp, prod, shade, pack, category: r.category||'', qty:0, totalLtr:0, rev:0, piCount:0};
-    const qty = parseFloat(r.quantity)||0;
-    agg[key].qty += qty;
-    agg[key].totalLtr += qty;
+    // Qty/PCS = number of pieces/units ordered (r.pcs)
+    const pcs = parseFloat(r.pcs) || parseFloat(r.qty) || 0;
+    agg[key].qty += pcs;
+    // Total Ltr/KG = actual volume (r.ltr — computed from pcs × packVol)
+    const packRef = (r.packSizeRef || '').trim();
+    let packVol = 0;
+    if (packRef && packRef.includes('|')) { packVol = parseFloat(packRef.split('|')[0]) || 0; }
+    else { const m = pack.match(/^([\d.]+)/); packVol = m ? parseFloat(m[1]) : 0; if (/ml/i.test(pack)) packVol /= 1000; if (/\bgm\b|\bgrm\b/i.test(pack)) packVol /= 1000; }
+    const storedLtr = parseFloat(r.ltr) || 0;
+    const computedLtr = packVol > 0 ? pcs * packVol : pcs;
+    agg[key].totalLtr += (storedLtr > 0 && storedLtr !== pcs) ? storedLtr : computedLtr;
     agg[key].rev += parseFloat(r.totalValue)||0;
     agg[key].piCount += 1;
   });
 
-  const rows = Object.values(agg).sort((a,b) => a.sp.localeCompare(b.sp) || b.qty - a.qty);
+  const rows = Object.values(agg).sort((a,b) => a.sp.localeCompare(b.sp) || b.totalLtr - a.totalLtr);
   const headers = ['Salesperson','Product','Shade','Pack Size','Category','No. of PIs','Total Qty','Total Ltr/KG','Revenue (INR)'];
   const csvRows = rows.map(r => [r.sp, r.prod, r.shade, r.pack, r.category, r.piCount, r.qty.toFixed(2), r.totalLtr.toFixed(2), r.rev.toFixed(0)]);
   downloadCSV([headers, ...csvRows], 'salesperson_sales_report.csv');
