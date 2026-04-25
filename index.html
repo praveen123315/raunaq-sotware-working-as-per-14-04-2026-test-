@@ -3225,7 +3225,8 @@ async function _syncOrder(order) {
   _updateSyncBadge('syncing');
   const r = await _sheetsPost('saveOrder', { data: {
     id: 'ORD-' + Date.now(),
-    date: order.date, client: order.client, region: order.region,
+    date: (function(d){ if(!d)return fmtDateOnly(); const dmy=String(d).match(/^(\d{2}-\d{2}-\d{4})/); if(dmy)return dmy[1]; const dt=new Date(d); return isNaN(dt)?d:(String(dt.getDate()).padStart(2,'0')+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+dt.getFullYear()); })(order.date),
+    client: order.client, region: order.region,
     salesPerson: order.sales, product: order.product, shade: order.shade,
     pack: order.pack, qty: order.qty, unit: 'L',
     finalRate: order.finalRate, totalAmount: order.totalAmount,
@@ -3619,7 +3620,7 @@ async function loadAllFromSheets() {
       totalCost: parseFloat(r.Total_Cost || r.totalCost)||0,
       perLtrCost: parseFloat(r.Per_Ltr_Cost || r.perLtrCost)||0,
       discountPct: parseFloat(r.Discount_Pct_Used || r.discountPct)||35,
-      date: r.Saved_At ? fmtDate(r.Saved_At) : (r.date || ''),
+      date: r.date ? (function(d){ const dmy=String(d).match(/^(\d{2})-(\d{2})-(\d{4})/); if(dmy)return dmy[1]; const dt=new Date(d); return isNaN(dt)?d:(String(dt.getDate()).padStart(2,'0')+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+dt.getFullYear()); })(r.date) : (r.Saved_At ? fmtDateOnly(r.Saved_At) : fmtDateOnly()),
       rmDetails: (res.costingRMRows||[]).filter(rm=>(rm.CostingID||rm.costingId)===(r.CostingID||r.costingId)).map(rm=>({
         rmCode: rm.RM_Code||rm.rmCode, rmName: rm.RM_Name||rm.rmName,
         price: parseFloat(rm.Price_Per_Kg||rm.price)||0, qty: parseFloat(rm.Qty_Kg||rm.qty)||0, amount: parseFloat(rm.Amount||rm.amount)||0
@@ -9300,11 +9301,44 @@ function renderFinalPITable() {
   const search = (document.getElementById('fpi-search')?.value || '').toLowerCase();
   const monthFilter = document.getElementById('fpi-filter-month')?.value || '';
 
+  // ── Date helpers ─────────────────────────────────────────────────────────
+  // Parse any date string → JS Date (handles dd-mm-yyyy, yyyy-mm-dd, ISO)
+  function _parseAnyDate(s) {
+    if (!s) return null;
+    // dd-mm-yyyy or dd-mm-yyyy hh:mm
+    const dmy = String(s).match(/^(\d{2})-(\d{2})-(\d{4})/);
+    if (dmy) return new Date(dmy[3] + '-' + dmy[2] + '-' + dmy[1]);
+    // ISO / yyyy-mm-dd
+    const d = new Date(s);
+    return isNaN(d) ? null : d;
+  }
+  // Format any date string → dd-mm-yyyy
+  function _toDisplay(s) {
+    if (!s) return '—';
+    const d = _parseAnyDate(s);
+    if (!d) return s;
+    return String(d.getDate()).padStart(2,'0') + '-' +
+           String(d.getMonth()+1).padStart(2,'0') + '-' +
+           d.getFullYear();
+  }
+  // Normalise stored date to dd-mm-yyyy (mutate piFinalDB in place so it persists)
+  piFinalDB.forEach(function(r) {
+    if (!r.date) return;
+    const dmy = String(r.date).match(/^\d{2}-\d{2}-\d{4}/);
+    if (!dmy) {
+      const d = _parseAnyDate(r.date);
+      if (d) r.date = String(d.getDate()).padStart(2,'0') + '-' +
+                      String(d.getMonth()+1).padStart(2,'0') + '-' +
+                      d.getFullYear();
+    }
+  });
+  // ─────────────────────────────────────────────────────────────────────────
+
   let data = piFinalDB.filter(r => {
     const matchSearch = !search || (r.customerName||'').toLowerCase().includes(search) ||
       (r.product||'').toLowerCase().includes(search) || (r.shade||'').toLowerCase().includes(search) ||
       (r.piNumber||'').toLowerCase().includes(search);
-    const matchMonth = !monthFilter || (r.date && new Date(r.date).getMonth()+1 === parseInt(monthFilter));
+    const matchMonth = !monthFilter || (_parseAnyDate(r.date) && _parseAnyDate(r.date).getMonth()+1 === parseInt(monthFilter));
     return matchSearch && matchMonth;
   });
 
@@ -9317,8 +9351,8 @@ function renderFinalPITable() {
     return;
   }
 
-  // Sort newest first
-  data = [...data].sort((a,b) => new Date(b.date) - new Date(a.date));
+  // Sort newest first using parsed date
+  data = [...data].sort((a,b) => (_parseAnyDate(b.date)||0) - (_parseAnyDate(a.date)||0));
 
   container.innerHTML = `<table class="data-table">
     <thead><tr>
@@ -9330,7 +9364,7 @@ function renderFinalPITable() {
     <tbody>
     ${data.map(r => `<tr>
       <td style="font-family:monospace;font-size:11px;color:var(--saffron);">${r.piNumber}</td>
-      <td style="font-size:12.5px;">${r.date}</td>
+      <td style="font-size:12.5px;">${_toDisplay(r.date)}</td>
       <td style="font-weight:600;">${r.customerName}</td>
       <td style="font-size:12px;color:var(--ink-muted);max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${r.address||''}">${r.address||'—'}</td>
       <td style="font-size:12.5px;">${r.product}</td>
