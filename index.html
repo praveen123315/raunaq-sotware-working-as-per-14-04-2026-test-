@@ -366,7 +366,7 @@ function nowDateTime() { return fmtDate(); }
             <span class="luc-perm" style="background:#FDECEA;color:#C0392B;">Can Delete</span>
           </div>
         </div>
-        <div class="login-user-card" onclick="quickLogin('richa','richa123')">
+        <div class="login-user-card" onclick="quickLogin('richa','')">
           <div class="luc-avatar" style="background:linear-gradient(135deg,#2D6A4F,#1e5035);">R</div>
           <div class="luc-name">Richa</div>
           <div class="luc-role">✏️ Data Entry</div>
@@ -377,6 +377,10 @@ function nowDateTime() { return fmtDate(); }
             <span class="luc-perm" style="background:#D8F3DC;color:#2D6A4F;">Costing</span>
           </div>
         </div>
+      </div>
+      <div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px;padding:8px 13px;font-size:11.5px;color:#92400E;margin-bottom:14px;display:flex;align-items:center;gap:8px;">
+        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span>Click a card to pre-fill username. Enter your password below and click <strong>Sign In</strong>. Default: <code>admin / admin123</code> · <code>richa / richa123</code></span>
       </div>
 
       <div style="margin-bottom:14px;">
@@ -478,6 +482,10 @@ function nowDateTime() { return fmtDate(); }
   <a class="nav-item" onclick="showPage('salesperson-master');return false;" href="javascript:void(0)">
     <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
     <span>Salesperson Master</span>
+  </a>
+  <a class="nav-item" id="nav-users-page" onclick="showPage('users-management');return false;" href="javascript:void(0)">
+    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+    <span>Users &amp; Access</span>
   </a>
 
   <div class="nav-section">Analytics</div>
@@ -1697,6 +1705,61 @@ SLV-001,Mineral Turpentine Oil,95,ltr,Local Supplier</pre>
         </div>
       </div>
 
+      <!-- User Management (Admin Only) -->
+      <div class="card" style="margin-bottom:18px;border-color:var(--saffron);border-width:1.5px;" id="user-mgmt-card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
+          <svg width="18" height="18" fill="none" stroke="var(--saffron)" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+          <div style="font-weight:700;font-size:15px;color:var(--saffron);">👥 User Management</div>
+          <span class="badge badge-saffron" style="margin-left:auto;font-size:10px;">🔐 Admin Only</span>
+          <button class="btn btn-primary btn-sm" onclick="openCreateUserModal()">+ Add User</button>
+        </div>
+
+        <!-- How to Login guide -->
+        <div style="background:var(--stone-light);border-radius:10px;padding:14px 16px;margin-bottom:16px;font-size:12.5px;line-height:1.75;color:var(--ink-soft);">
+          <div style="font-weight:700;margin-bottom:6px;font-size:13px;">📖 How to Login</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div>
+              <div style="font-weight:600;margin-bottom:3px;">Step 1 — Open the login screen</div>
+              Click your name card <em>(Admin / Richa)</em> to pre-fill the username, <strong>or</strong> type it manually in the Username field.
+            </div>
+            <div>
+              <div style="font-weight:600;margin-bottom:3px;">Step 2 — Enter your password</div>
+              Type your password in the Password field. Click <strong>Sign In</strong> or press <kbd style="background:#fff;border:1px solid var(--stone);border-radius:4px;padding:1px 5px;font-size:11px;">Enter</kbd>.
+            </div>
+            <div>
+              <div style="font-weight:600;margin-bottom:3px;">Default credentials</div>
+              <code style="background:#fff;border:1px solid var(--stone);border-radius:5px;padding:3px 8px;font-size:12px;">admin / admin123</code><br/>
+              <code style="background:#fff;border:1px solid var(--stone);border-radius:5px;padding:3px 8px;font-size:12px;margin-top:4px;display:inline-block;">richa / richa123</code>
+            </div>
+            <div>
+              <div style="font-weight:600;margin-bottom:3px;">Forgot password?</div>
+              Admin can reset any user's password below using the <strong>🔁 Reset</strong> button. Users can change their own password via the account menu in the top-right corner.
+            </div>
+          </div>
+        </div>
+
+        <!-- Users table -->
+        <div style="overflow-x:auto;">
+          <table class="data-table" id="user-mgmt-table" style="font-size:13px;">
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Display Name</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th style="text-align:right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="user-mgmt-tbody">
+              <tr><td colspan="5" style="color:var(--ink-muted);text-align:center;padding:20px;">Loading users…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="margin-top:10px;font-size:11.5px;color:var(--ink-muted);">
+          🔒 Changes are saved to local storage. If Google Sheets is connected, user accounts also sync there.
+        </div>
+      </div>
+
       <!-- Data Management -->
       <div class="card" style="margin-bottom:18px;">
         <div style="font-weight:700;font-size:15px;margin-bottom:16px;">💾 Data Management</div>
@@ -1754,6 +1817,123 @@ SLV-001,Mineral Turpentine Oil,95,ltr,Local Supplier</pre>
         </div>
       </div>
     </div>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- USERS & ACCESS MANAGEMENT PAGE                         -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <div id="page-users-management" class="page">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px;">
+        <div>
+          <div class="section-heading">&#x1F465; Users &amp; Access</div>
+          <div class="section-sub">Manage login credentials, roles and permissions for all users</div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;" id="users-page-admin-controls">
+          <button class="btn btn-primary" onclick="openCreateUserModal();setTimeout(renderUserMgmtTableFull,400);">
+            <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add User
+          </button>
+          <button class="btn btn-outline" onclick="renderUserMgmtTableFull()" title="Refresh">
+            <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">
+        <div class="stat-card"><div class="accent-bar" style="background:var(--saffron)"></div><div class="stat-label">Total Users</div><div class="stat-number" id="ustat-total">&#8212;</div><div style="font-size:11px;color:var(--ink-muted);margin-top:6px;">All accounts</div></div>
+        <div class="stat-card"><div class="accent-bar" style="background:var(--green-accent)"></div><div class="stat-label">Active</div><div class="stat-number" id="ustat-active">&#8212;</div><div style="font-size:11px;color:var(--ink-muted);margin-top:6px;">Can sign in</div></div>
+        <div class="stat-card"><div class="accent-bar" style="background:#3B82F6"></div><div class="stat-label">Admins</div><div class="stat-number" id="ustat-admins">&#8212;</div><div style="font-size:11px;color:var(--ink-muted);margin-top:6px;">Full access</div></div>
+      </div>
+
+      <!-- Default credentials banner -->
+      <div style="background:linear-gradient(135deg,#FDE8D4,#FEF3C7);border:1.5px solid var(--saffron-light);border-radius:12px;padding:16px 20px;margin-bottom:20px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+          <svg width="16" height="16" fill="none" stroke="var(--saffron)" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <strong style="font-size:13.5px;color:var(--saffron);">Current Login Credentials</strong>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;">
+          <div style="background:#fff;border-radius:9px;padding:12px 16px;border:1px solid var(--saffron-light);">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+              <div style="width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#E8711A,#D4631A);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;">A</div>
+              <div><div style="font-weight:700;">Admin</div><div style="font-size:10.5px;color:var(--ink-muted);">&#x1F510; Full Access · Can Delete</div></div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+              <code style="background:var(--stone-light);border:1px solid var(--stone);border-radius:5px;padding:3px 9px;font-size:12.5px;">admin</code>
+              <span style="color:var(--ink-muted);">/</span>
+              <code id="cred-admin-pw" style="background:var(--stone-light);border:1px solid var(--stone);border-radius:5px;padding:3px 9px;font-size:12.5px;">admin123</code>
+            </div>
+          </div>
+          <div style="background:#fff;border-radius:9px;padding:12px 16px;border:1px solid #B7E4C7;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+              <div style="width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#2D6A4F,#1e5035);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;">R</div>
+              <div><div style="font-weight:700;">Richa</div><div style="font-size:10.5px;color:var(--ink-muted);">&#x270F;&#xFE0F; Data Entry · Create &amp; View</div></div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+              <code style="background:var(--stone-light);border:1px solid var(--stone);border-radius:5px;padding:3px 9px;font-size:12.5px;">richa</code>
+              <span style="color:var(--ink-muted);">/</span>
+              <code id="cred-richa-pw" style="background:var(--stone-light);border:1px solid var(--stone);border-radius:5px;padding:3px 9px;font-size:12.5px;">richa123</code>
+            </div>
+          </div>
+        </div>
+        <div style="font-size:11.5px;color:#92400E;margin-top:10px;">&#9888; Passwords shown reflect current saved values. Use <strong>Reset PW</strong> to change. If Google Sheets is connected, changes sync to the <em>Users</em> sheet automatically.</div>
+      </div>
+
+      <!-- Full users table -->
+      <div class="card" style="padding:0;overflow:hidden;margin-bottom:20px;">
+        <div style="padding:16px 22px;border-bottom:1px solid var(--stone);display:flex;align-items:center;gap:10px;">
+          <svg width="16" height="16" fill="none" stroke="var(--saffron)" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+          <span style="font-weight:700;font-size:14px;">All User Accounts</span>
+          <span id="users-count-badge" class="badge badge-saffron" style="margin-left:auto;font-size:10.5px;"></span>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="data-table" id="users-full-table" style="font-size:13px;">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Username</th>
+                <th>Display Name</th>
+                <th>Password</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th style="text-align:right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="users-full-tbody">
+              <tr><td colspan="8" style="color:var(--ink-muted);text-align:center;padding:28px;">Loading&#8230;</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="padding:10px 22px;border-top:1px solid var(--stone-light);font-size:11.5px;color:var(--ink-muted);">
+          &#x1F512; Passwords are stored in local browser storage and synced to Google Sheets (both plain text and hash) when connected.
+        </div>
+      </div>
+
+      <!-- Permissions matrix -->
+      <div class="card">
+        <div style="font-weight:700;font-size:15px;margin-bottom:16px;display:flex;align-items:center;gap:8px;">
+          <svg width="16" height="16" fill="none" stroke="var(--saffron)" stroke-width="2" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          Permission Matrix
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="data-table" style="font-size:13px;">
+            <thead><tr><th>Feature</th><th>&#x1F510; Admin</th><th>&#x270F;&#xFE0F; Data Entry (Richa)</th></tr></thead>
+            <tbody>
+              <tr><td>Create PI / Orders</td><td><span class="badge badge-green">&#x2713; Yes</span></td><td><span class="badge badge-green">&#x2713; Yes</span></td></tr>
+              <tr><td>View / Search Records</td><td><span class="badge badge-green">&#x2713; Yes</span></td><td><span class="badge badge-green">&#x2713; Yes</span></td></tr>
+              <tr><td>Edit Prices &amp; Price List</td><td><span class="badge badge-green">&#x2713; Yes</span></td><td><span class="badge badge-green">&#x2713; Yes</span></td></tr>
+              <tr><td>Formulation Costing</td><td><span class="badge badge-green">&#x2713; Yes</span></td><td><span class="badge badge-green">&#x2713; Yes</span></td></tr>
+              <tr><td>Reports &amp; Analytics</td><td><span class="badge badge-green">&#x2713; Yes</span></td><td><span class="badge badge-green">&#x2713; Yes</span></td></tr>
+              <tr><td>Delete Records</td><td><span class="badge badge-saffron">&#x2713; Admin Only</span></td><td><span class="badge" style="background:#FDECEA;color:#C0392B;">&#x2717; Blocked</span></td></tr>
+              <tr><td>Manage Users</td><td><span class="badge badge-saffron">&#x2713; Admin Only</span></td><td><span class="badge" style="background:#FDECEA;color:#C0392B;">&#x2717; Blocked</span></td></tr>
+              <tr><td>Reset Passwords</td><td><span class="badge badge-saffron">&#x2713; Admin Only</span></td><td><span class="badge" style="background:#FDECEA;color:#C0392B;">&#x2717; Blocked</span></td></tr>
+              <tr><td>Google Sheets Sync</td><td><span class="badge badge-green">&#x2713; Yes</span></td><td><span class="badge badge-green">&#x2713; Yes</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <!-- ═══ END USERS PAGE ═══ -->
 
     <!-- ═══════════════════════════════════════════════════════ -->
     <!-- ① CUSTOMER MASTER                                      -->
@@ -2936,13 +3116,13 @@ SLV-001,Mineral Turpentine Oil,95,ltr,Local Supplier</pre>
 // ============================================================
 // CONSTANTS
 // ============================================================
-const GOOGLE_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby7rgyA_0NK2_P5UQHkVvSM3gQOiSZP7mPNJPSvc7psjDuZyd1TZAVg0PGttGRSmk2RYg/exec';
+const GOOGLE_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxMUCm9CTxuqEk_kawszCYyqH7axaZFRg9kNy33QyIzpUmogxAnLpLCCf3ipYQo0jjGkQ/exec';
 
 // ============================================================
 // GOOGLE SHEETS API — CONFIGURATION
 // ▶ After deploying your Apps Script Web App, paste the URL below
 // ============================================================
-const SHEETS_API_URL = 'https://script.google.com/macros/s/AKfycby7rgyA_0NK2_P5UQHkVvSM3gQOiSZP7mPNJPSvc7psjDuZyd1TZAVg0PGttGRSmk2RYg/exec';
+const SHEETS_API_URL = 'https://script.google.com/macros/s/AKfycbxMUCm9CTxuqEk_kawszCYyqH7axaZFRg9kNy33QyIzpUmogxAnLpLCCf3ipYQo0jjGkQ/exec';
 // Example: 'https://script.google.com/macros/s/AKfycb.../exec'
 
 // ── Sheets sync status ─────────────────────────────────────
@@ -3852,6 +4032,7 @@ function showPage(page) {
     'bulk-import':           ['Bulk Import', 'Download sample CSV · fill your data · upload in bulk'],
     'stock-planner':         ['Stock Planner', 'Monthly shade & pack-size quantities from Final PI · top sellers highlighted'],
     'salesperson-report':    ['Salesperson Sales Report', 'Qty sold per salesperson with shade, pack size & product breakdown — from Final PI'],
+    'users-management':      ['Users & Access', 'Manage login credentials, roles and permissions for all users'],
   };
   document.getElementById('page-title').textContent = titles[page]?.[0] || page;
   document.getElementById('page-sub').textContent = titles[page]?.[1] || '';
@@ -3868,6 +4049,8 @@ function showPage(page) {
   if (page === 'costing-master') renderCostingMaster();
   if (page === 'formulation-costing') initCostingFormIfEmpty();
   if (page === 'profit-loss') renderPLDashboard();
+  if (page === 'system-options') renderUserMgmtTable();
+  if (page === 'users-management') renderUserMgmtTableFull();
   if (page === 'production-sheet') setTimeout(() => { const c = document.getElementById('ps-costing-results'); if(c && !c.innerHTML.trim()) searchCostingForPS(); }, 80);
   if (page === 'bulk-import') {
     ['customers','rm','prices'].forEach(t => { const el=document.getElementById('bulk-tab-'+t); if(el) el.style.display='none'; });
@@ -7856,9 +8039,14 @@ async function _sheetsPostReadable(action, payload) {
 
 function quickLogin(username, password) {
   document.getElementById('login-username').value = username;
-  document.getElementById('login-password').value = password;
-  // animate the card selection then login
-  setTimeout(doLogin, 150);
+  if (password) {
+    document.getElementById('login-password').value = password;
+    setTimeout(doLogin, 150);
+  } else {
+    // No password pre-fill — focus password field so user types their own
+    document.getElementById('login-password').value = '';
+    setTimeout(function(){ document.getElementById('login-password').focus(); }, 100);
+  }
 }
 
 function showLoginPanel() {
@@ -8161,7 +8349,310 @@ async function submitChangePassword() {
   }
 }
 
-// ── Session restore on load ─────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+//  USER MANAGEMENT (Admin) — render table, create, reset password
+// ═══════════════════════════════════════════════════════════════
+
+function renderUserMgmtTable() {
+  const tbody = document.getElementById('user-mgmt-tbody');
+  if (!tbody) return;
+  // Only visible to admin
+  const card = document.getElementById('user-mgmt-card');
+  if (card) card.style.display = isAdmin() ? '' : 'none';
+  if (!isAdmin()) return;
+
+  const users = _getLocalUsers();
+  if (!users.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--ink-muted);text-align:center;padding:20px;">No users found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = users.map(function(u) {
+    const roleLabel = u.role === 'admin'
+      ? '<span class="badge badge-saffron" style="font-size:10px;">🔐 Admin</span>'
+      : '<span class="badge badge-green" style="font-size:10px;">✏️ Data Entry</span>';
+    const statusLabel = u.isActive === false
+      ? '<span class="badge" style="background:#FDECEA;color:#C0392B;font-size:10px;">Inactive</span>'
+      : '<span class="badge badge-green" style="font-size:10px;">Active</span>';
+    const isSelf = _currentUser && (_currentUser.username === u.username);
+    return `<tr>
+      <td><strong>${u.username}</strong>${isSelf ? ' <span style="font-size:10px;color:var(--ink-muted);">(you)</span>' : ''}</td>
+      <td>${u.displayName || u.username}</td>
+      <td>${roleLabel}</td>
+      <td>${statusLabel}</td>
+      <td style="text-align:right;">
+        <div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap;">
+          <button class="btn btn-outline btn-sm" onclick="openResetPasswordModal('${u.username}','${(u.displayName||u.username).replace(/'/g,"\\'")}')">🔁 Reset PW</button>
+          <button class="btn btn-outline btn-sm" onclick="toggleUserActive('${u.username}')" ${isSelf?'disabled title="Cannot deactivate yourself"':''}>
+            ${u.isActive===false ? '✅ Activate' : '⏸ Deactivate'}
+          </button>
+          ${!isSelf ? `<button class="btn btn-danger btn-sm" onclick="deleteUserLocal('${u.username}')">🗑 Delete</button>` : ''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function openCreateUserModal() {
+  if (!isAdmin()) { showToast('Admin access required.', 'error'); return; }
+  let modal = document.getElementById('create-user-modal');
+  if (modal) modal.remove();
+  modal = document.createElement('div');
+  modal.id = 'create-user-modal';
+  modal.className = 'modal-overlay open';
+  modal.innerHTML = `
+    <div class="modal-box modal-box-sm">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+        <div class="section-heading" style="font-size:18px;">➕ Create New User</div>
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('create-user-modal').remove()">✕</button>
+      </div>
+      <div id="cu-error" style="display:none;background:#FDECEA;border:1px solid #F5C6C2;color:#C0392B;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:14px;"></div>
+      <div style="display:grid;gap:13px;margin-bottom:20px;">
+        <div>
+          <label class="form-label">Full Name</label>
+          <input class="form-input" id="cu-name" type="text" placeholder="e.g. Priya Sharma" />
+        </div>
+        <div>
+          <label class="form-label">Username *</label>
+          <input class="form-input" id="cu-username" type="text" placeholder="e.g. priya (no spaces)" autocomplete="off" />
+        </div>
+        <div>
+          <label class="form-label">Password *</label>
+          <input class="form-input" id="cu-password" type="password" placeholder="Min 6 characters" />
+        </div>
+        <div>
+          <label class="form-label">Confirm Password *</label>
+          <input class="form-input" id="cu-confirm" type="password" placeholder="Repeat password" />
+        </div>
+        <div>
+          <label class="form-label">Role</label>
+          <select class="form-input" id="cu-role">
+            <option value="data_entry">✏️ Data Entry (Create & View)</option>
+            <option value="admin">🔐 Admin (Full Access + Delete)</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-primary" onclick="submitCreateUser()">Create User</button>
+        <button class="btn btn-outline" onclick="document.getElementById('create-user-modal').remove()">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  setTimeout(function(){ document.getElementById('cu-name').focus(); }, 100);
+}
+
+function submitCreateUser() {
+  const name     = document.getElementById('cu-name').value.trim();
+  const username = document.getElementById('cu-username').value.trim().toLowerCase().replace(/\s+/g,'');
+  const password = document.getElementById('cu-password').value;
+  const confirm  = document.getElementById('cu-confirm').value;
+  const role     = document.getElementById('cu-role').value;
+  const errEl    = document.getElementById('cu-error');
+  errEl.style.display = 'none';
+
+  if (!username) { errEl.textContent='Username is required.'; errEl.style.display='block'; return; }
+  if (!password || password.length < 6) { errEl.textContent='Password must be at least 6 characters.'; errEl.style.display='block'; return; }
+  if (password !== confirm) { errEl.textContent='Passwords do not match.'; errEl.style.display='block'; return; }
+
+  const users = _getLocalUsers();
+  if (users.find(function(u){ return u.username.toLowerCase() === username; })) {
+    errEl.textContent = 'Username "' + username + '" already exists.'; errEl.style.display='block'; return;
+  }
+
+  const newUser = {
+    id: 'USR-' + Date.now(),
+    username, password,
+    displayName: name || username,
+    role, email: '', isActive: true,
+    createdAt: new Date().toISOString()
+  };
+  users.push(newUser);
+  _saveLocalUsers(users);
+
+  // Also sync to Sheets if connected
+  if (typeof _sheetsPost === 'function' && _sheetsConnected) {
+    _sheetsPost('saveUser', { data: {
+      id: newUser.id, username: newUser.username,
+      name: newUser.displayName, email: '',
+      password: newUser.password, role: newUser.role
+    }}).catch(function(){});
+  }
+
+  document.getElementById('create-user-modal').remove();
+  renderUserMgmtTable();
+  renderUserMgmtTableFull();
+  showToast('User "' + username + '" created successfully ✓', 'success');
+}
+
+function openResetPasswordModal(username, displayName) {
+  if (!isAdmin()) { showToast('Admin access required.', 'error'); return; }
+  let modal = document.getElementById('reset-pw-modal');
+  if (modal) modal.remove();
+  modal = document.createElement('div');
+  modal.id = 'reset-pw-modal';
+  modal.className = 'modal-overlay open';
+  modal.innerHTML = `
+    <div class="modal-box modal-box-sm">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+        <div class="section-heading" style="font-size:18px;">🔁 Reset Password</div>
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('reset-pw-modal').remove()">✕</button>
+      </div>
+      <div style="background:var(--stone-light);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;">
+        Resetting password for: <strong>${displayName}</strong> <span style="color:var(--ink-muted);">(${username})</span>
+      </div>
+      <div id="rp-error" style="display:none;background:#FDECEA;border:1px solid #F5C6C2;color:#C0392B;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:14px;"></div>
+      <div style="display:grid;gap:13px;margin-bottom:20px;">
+        <div>
+          <label class="form-label">New Password *</label>
+          <input class="form-input" id="rp-new" type="password" placeholder="Min 6 characters" />
+        </div>
+        <div>
+          <label class="form-label">Confirm New Password *</label>
+          <input class="form-input" id="rp-confirm" type="password" placeholder="Repeat new password" />
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-primary" onclick="submitResetPassword('${username}')">Reset Password</button>
+        <button class="btn btn-outline" onclick="document.getElementById('reset-pw-modal').remove()">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  setTimeout(function(){ document.getElementById('rp-new').focus(); }, 100);
+}
+
+function submitResetPassword(username) {
+  const newPw   = document.getElementById('rp-new').value;
+  const confirm = document.getElementById('rp-confirm').value;
+  const errEl   = document.getElementById('rp-error');
+  errEl.style.display = 'none';
+
+  if (!newPw || newPw.length < 6) { errEl.textContent='Password must be at least 6 characters.'; errEl.style.display='block'; return; }
+  if (newPw !== confirm) { errEl.textContent='Passwords do not match.'; errEl.style.display='block'; return; }
+
+  const users = _getLocalUsers();
+  const idx = users.findIndex(function(u){ return u.username === username; });
+  if (idx < 0) { errEl.textContent='User not found.'; errEl.style.display='block'; return; }
+
+  users[idx].password = newPw;
+  _saveLocalUsers(users);
+
+  // Also sync to Sheets if connected (admin reset — no old password needed)
+  if (typeof _sheetsPost === 'function' && _sheetsConnected) {
+    _sheetsPost('adminResetPassword', { username, newPassword: newPw }).catch(function(){});
+  }
+
+  document.getElementById('reset-pw-modal').remove();
+  renderUserMgmtTable();
+  renderUserMgmtTableFull();
+  showToast('Password for "' + username + '" has been reset ✓', 'success');
+}
+
+function toggleUserActive(username) {
+  if (!isAdmin()) { showToast('Admin access required.', 'error'); return; }
+  const users = _getLocalUsers();
+  const idx = users.findIndex(function(u){ return u.username === username; });
+  if (idx < 0) return;
+  users[idx].isActive = users[idx].isActive === false ? true : false;
+  _saveLocalUsers(users);
+  renderUserMgmtTable();
+  renderUserMgmtTableFull();
+  showToast('User "' + username + '" ' + (users[idx].isActive ? 'activated' : 'deactivated') + ' ✓', 'info');
+}
+
+function deleteUserLocal(username) {
+  if (!isAdmin()) { showToast('Admin access required.', 'error'); return; }
+  if (!confirm('Delete user "' + username + '"? This cannot be undone.')) return;
+  const users = _getLocalUsers().filter(function(u){ return u.username !== username; });
+  _saveLocalUsers(users);
+  renderUserMgmtTable();
+  renderUserMgmtTableFull();
+  showToast('User "' + username + '" deleted.', 'info');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  FULL USERS PAGE — renderUserMgmtTableFull
+//  Shows all users with plain-text password column + stats
+// ═══════════════════════════════════════════════════════════════
+function renderUserMgmtTableFull() {
+  const tbody = document.getElementById('users-full-tbody');
+  const badge = document.getElementById('users-count-badge');
+  if (!tbody) return;
+
+  const users = _getLocalUsers();
+
+  // Stats
+  const total   = users.length;
+  const active  = users.filter(function(u){ return u.isActive !== false; }).length;
+  const admins  = users.filter(function(u){ return u.role === 'admin'; }).length;
+  const elT = document.getElementById('ustat-total');
+  const elA = document.getElementById('ustat-active');
+  const elAd = document.getElementById('ustat-admins');
+  if (elT)  elT.textContent  = total;
+  if (elA)  elA.textContent  = active;
+  if (elAd) elAd.textContent = admins;
+  if (badge) badge.textContent = total + ' user' + (total !== 1 ? 's' : '');
+
+  // Refresh live credential cards
+  const adminUser  = users.find(function(u){ return u.username === 'admin'; });
+  const richaUser  = users.find(function(u){ return u.username === 'richa'; });
+  const credAdmin  = document.getElementById('cred-admin-pw');
+  const credRicha  = document.getElementById('cred-richa-pw');
+  if (credAdmin && adminUser) credAdmin.textContent = adminUser.password || '(hidden)';
+  if (credRicha && richaUser) credRicha.textContent = richaUser.password || '(hidden)';
+
+  // Restrict UI for non-admins
+  const adminCtrl = document.getElementById('users-page-admin-controls');
+  if (adminCtrl) adminCtrl.style.display = isAdmin() ? '' : 'none';
+
+  if (!users.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="color:var(--ink-muted);text-align:center;padding:28px;">No users found.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = users.map(function(u, i) {
+    const roleLabel = u.role === 'admin'
+      ? '<span class="badge badge-saffron" style="font-size:10px;">&#x1F510; Admin</span>'
+      : '<span class="badge badge-green" style="font-size:10px;">&#x270F;&#xFE0F; Data Entry</span>';
+    const statusLabel = u.isActive === false
+      ? '<span class="badge" style="background:#FDECEA;color:#C0392B;font-size:10px;">Inactive</span>'
+      : '<span class="badge badge-green" style="font-size:10px;">&#x25CF; Active</span>';
+    const isSelf = _currentUser && (_currentUser.username === u.username);
+    const pwDisplay = isAdmin() ? (u.password || '<em style="color:var(--ink-muted)">—</em>') : '&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;';
+    const created = u.createdAt ? fmtDate(u.createdAt) : '<span style="color:var(--ink-muted)">—</span>';
+    const actions = isAdmin() ? `
+      <div style="display:flex;gap:5px;justify-content:flex-end;flex-wrap:wrap;">
+        <button class="btn btn-outline btn-sm" onclick="openResetPasswordModal('${u.username}','${(u.displayName||u.username).replace(/'/g,"\\'")}')">&#x1F501; Reset PW</button>
+        <button class="btn btn-outline btn-sm" onclick="toggleUserActive('${u.username}')" ${isSelf ? 'disabled title="Cannot deactivate yourself"' : ''}>
+          ${u.isActive === false ? '&#x2705; Activate' : '&#x23F8; Deactivate'}
+        </button>
+        ${!isSelf ? `<button class="btn btn-danger btn-sm" onclick="deleteUserFromPage('${u.username}')">&#x1F5D1; Delete</button>` : ''}
+      </div>` : '<span style="font-size:11.5px;color:var(--ink-muted);">&#x1F512; Admin only</span>';
+
+    return `<tr>
+      <td style="color:var(--ink-muted);font-size:12px;">${i+1}</td>
+      <td><strong>${u.username}</strong>${isSelf ? ' <span style="font-size:10px;color:var(--saffron);">(you)</span>' : ''}</td>
+      <td>${u.displayName || u.username}</td>
+      <td><code style="background:var(--stone-light);border-radius:5px;padding:2px 8px;font-size:12px;letter-spacing:0.04em;">${pwDisplay}</code></td>
+      <td>${roleLabel}</td>
+      <td>${statusLabel}</td>
+      <td style="font-size:12px;color:var(--ink-muted);">${created}</td>
+      <td style="text-align:right;">${actions}</td>
+    </tr>`;
+  }).join('');
+}
+
+function deleteUserFromPage(username) {
+  if (!isAdmin()) { showToast('Admin access required.', 'error'); return; }
+  if (!confirm('Delete user "' + username + '"? This cannot be undone.')) return;
+  const users = _getLocalUsers().filter(function(u){ return u.username !== username; });
+  _saveLocalUsers(users);
+  renderUserMgmtTable();
+  renderUserMgmtTableFull();
+  showToast('User "' + username + '" deleted.', 'info');
+  // Sync delete to Sheets if connected
+  if (typeof _sheetsPost === 'function' && _sheetsConnected) {
+    _sheetsPost('deleteUser', { username }).catch(function(){});
+  }
+}
 (function restoreSession() {
   try {
     const saved = sessionStorage.getItem('raunaq_user');
