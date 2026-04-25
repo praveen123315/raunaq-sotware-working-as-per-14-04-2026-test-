@@ -838,11 +838,38 @@ function nowDateTime() { return fmtDate(); }
             <div id="waterfall-box" style="margin-bottom:16px;">
               <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink-muted);margin-bottom:8px;">Discount Waterfall</div>
               <div style="display:flex;flex-direction:column;gap:6px;">
-                <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 10px;background:var(--stone-light);border-radius:6px;"><span>DPL Rate</span><span id="wf-dpl" style="font-weight:600;">—</span></div>
-                <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 10px;background:var(--stone-light);border-radius:6px;"><span>After Per Litre Disc.</span><span id="wf-after-pl" style="color:var(--green-accent)">—</span></div>
-                <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 10px;background:var(--stone-light);border-radius:6px;"><span>After Trade Disc.</span><span id="wf-after-trade" style="color:var(--green-accent)">—</span></div>
-                <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 10px;background:var(--stone-light);border-radius:6px;"><span>After Loyalty Disc.</span><span id="wf-after-loyalty" style="color:var(--green-accent)">—</span></div>
-                <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 10px;background:var(--stone-light);border-radius:6px;"><span>After Cash Disc.</span><span id="wf-after-cash" style="color:var(--green-accent)">—</span></div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:7px 10px;background:var(--ink);border-radius:6px;">
+                  <span style="color:#fff;font-weight:700;">DPL Rate</span>
+                  <span id="wf-dpl" style="font-weight:800;color:#fff;font-size:14px;">—</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:6px 10px;background:var(--stone-light);border-radius:6px;" id="wf-row-pl">
+                  <span style="color:var(--ink-soft);">↓ Per Litre Disc.</span>
+                  <span style="display:flex;align-items:center;gap:10px;">
+                    <span id="wf-pl-saved" style="font-size:11.5px;color:var(--red-accent);font-weight:600;"></span>
+                    <span id="wf-after-pl" style="color:var(--green-accent);font-weight:600;">—</span>
+                  </span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:6px 10px;background:var(--stone-light);border-radius:6px;" id="wf-row-trade">
+                  <span style="color:var(--ink-soft);">↓ Trade Disc.</span>
+                  <span style="display:flex;align-items:center;gap:10px;">
+                    <span id="wf-trade-saved" style="font-size:11.5px;color:var(--red-accent);font-weight:600;"></span>
+                    <span id="wf-after-trade" style="color:var(--green-accent);font-weight:600;">—</span>
+                  </span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:6px 10px;background:var(--stone-light);border-radius:6px;" id="wf-row-loyalty">
+                  <span style="color:var(--ink-soft);">↓ Loyalty Disc.</span>
+                  <span style="display:flex;align-items:center;gap:10px;">
+                    <span id="wf-loyalty-saved" style="font-size:11.5px;color:var(--red-accent);font-weight:600;"></span>
+                    <span id="wf-after-loyalty" style="color:var(--green-accent);font-weight:600;">—</span>
+                  </span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:6px 10px;background:var(--stone-light);border-radius:6px;" id="wf-row-cash">
+                  <span style="color:var(--ink-soft);">↓ Cash Disc.</span>
+                  <span style="display:flex;align-items:center;gap:10px;">
+                    <span id="wf-cash-saved" style="font-size:11.5px;color:var(--red-accent);font-weight:600;"></span>
+                    <span id="wf-after-cash" style="color:var(--green-accent);font-weight:600;">—</span>
+                  </span>
+                </div>
               </div>
             </div>
             <div class="rate-display">
@@ -2737,9 +2764,10 @@ SLV-001,Mineral Turpentine Oil,95,ltr,Local Supplier</pre>
       <button onclick="closePIModal()" class="btn btn-outline" style="padding:6px 12px;">✕ Close</button>
     </div>
     <div id="pi-content"></div>
-    <div style="margin-top:20px;display:flex;gap:8px;">
+    <div style="margin-top:20px;display:flex;gap:8px;flex-wrap:wrap;">
       <button class="btn btn-primary" onclick="window.print()">🖨 Print</button>
       <button class="btn" style="background:#1e40af;color:#fff;" onclick="downloadPIasPDF()">⬇ Download PDF</button>
+      <button class="btn" style="background:#92400E;color:#fff;border:2px solid #F59E0B;" onclick="downloadBiharPIasPDF()" title="Print Bihar/JH version — no discounts applied">🏷 Print Bihar (No Discount)</button>
       <button class="btn btn-green" onclick="saveOrder();closePIModal()">💾 Save Order</button>
       <button class="btn" style="background:#8B5CF6;color:#fff;" onclick="finalizePI()">✅ Finalize PI (Save to Database)</button>
     </div>
@@ -2908,13 +2936,13 @@ SLV-001,Mineral Turpentine Oil,95,ltr,Local Supplier</pre>
 // ============================================================
 // CONSTANTS
 // ============================================================
-const GOOGLE_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzN4pnND5yrvUgwCUcs78iDAy4WMDZhOWtbueTpaXxIzK0perQDa9_uOcqDhSBhmTIbHQ/exec';
+const GOOGLE_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby7rgyA_0NK2_P5UQHkVvSM3gQOiSZP7mPNJPSvc7psjDuZyd1TZAVg0PGttGRSmk2RYg/exec';
 
 // ============================================================
 // GOOGLE SHEETS API — CONFIGURATION
 // ▶ After deploying your Apps Script Web App, paste the URL below
 // ============================================================
-const SHEETS_API_URL = 'https://script.google.com/macros/s/AKfycbzN4pnND5yrvUgwCUcs78iDAy4WMDZhOWtbueTpaXxIzK0perQDa9_uOcqDhSBhmTIbHQ/exec';
+const SHEETS_API_URL = 'https://script.google.com/macros/s/AKfycby7rgyA_0NK2_P5UQHkVvSM3gQOiSZP7mPNJPSvc7psjDuZyd1TZAVg0PGttGRSmk2RYg/exec';
 // Example: 'https://script.google.com/macros/s/AKfycb.../exec'
 
 // ── Sheets sync status ─────────────────────────────────────
@@ -4261,17 +4289,28 @@ function calcPrice() {
   let price = dpl;
   document.getElementById('wf-dpl').textContent = '₹ ' + price.toFixed(2);
 
+  const _wfSet = function(rowId, savedId, afterId, discAmt, newPrice, active) {
+    const row = document.getElementById(rowId);
+    if (row) row.style.opacity = active ? '1' : '0.38';
+    document.getElementById(savedId).textContent = active ? ('−₹ ' + discAmt.toFixed(2)) : '';
+    document.getElementById(afterId).textContent = active ? ('₹ ' + newPrice.toFixed(2)) : '—';
+  };
+
+  const prevPl = price;
   price -= perLitre;
-  document.getElementById('wf-after-pl').textContent = perLitre > 0 ? '₹ ' + price.toFixed(2) : '—';
+  _wfSet('wf-row-pl', 'wf-pl-saved', 'wf-after-pl', prevPl - price, price, perLitre > 0);
 
+  const prevTrade = price;
   price -= price * trade / 100;
-  document.getElementById('wf-after-trade').textContent = trade > 0 ? '₹ ' + price.toFixed(2) : '—';
+  _wfSet('wf-row-trade', 'wf-trade-saved', 'wf-after-trade', prevTrade - price, price, trade > 0);
 
+  const prevLoyalty = price;
   price -= price * loyalty / 100;
-  document.getElementById('wf-after-loyalty').textContent = loyalty > 0 ? '₹ ' + price.toFixed(2) : '—';
+  _wfSet('wf-row-loyalty', 'wf-loyalty-saved', 'wf-after-loyalty', prevLoyalty - price, price, loyalty > 0);
 
+  const prevCash = price;
   price -= price * cash / 100;
-  document.getElementById('wf-after-cash').textContent = cash > 0 ? '₹ ' + price.toFixed(2) : '—';
+  _wfSet('wf-row-cash', 'wf-cash-saved', 'wf-after-cash', prevCash - price, price, cash > 0);
 
   const finalRate = Math.max(0, price);
   const total = finalRate * qty;
@@ -4448,13 +4487,20 @@ function downloadPIasPDF() {
   const piNumEl = piContent.querySelector('[style*="font-size:20px"]');
   const piNum = piNumEl ? piNumEl.textContent.trim() : 'PI';
 
+  // Date in dd-mm-yyyy format for filename/title
+  const _now = new Date();
+  const _dd = String(_now.getDate()).padStart(2,'0');
+  const _mm = String(_now.getMonth()+1).padStart(2,'0');
+  const _yyyy = _now.getFullYear();
+  const _dateStr = _dd + '-' + _mm + '-' + _yyyy;
+
   // Build A4 print window
   const win = window.open('', '_blank', 'width=900,height=700');
   win.document.write(`<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<title>${piNum} - Raunaq Paint Industry</title>
+<title>${piNum}_${_dateStr} - Raunaq Paint Industry</title>
 <style>
   @page { size: A4; margin: 18mm 16mm 18mm 16mm; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -4637,6 +4683,121 @@ function downloadPIasPDF() {
   win.onload = function() { setTimeout(function(){ win.print(); }, 400); };
 }
 
+// ── BIHAR PRINT (No Discount Applied) ─────────────────────────────
+function downloadBiharPIasPDF() {
+  // Temporarily zero out all discount fields, generate PDF, then restore
+  const fields = ['pi-disc-per-litre','pi-disc-trade','pi-disc-loyalty','pi-disc-cash'];
+  const savedVals = fields.map(function(id){
+    const el = document.getElementById(id);
+    return el ? el.value : '';
+  });
+  // Zero discounts
+  fields.forEach(function(id){
+    const el = document.getElementById(id);
+    if (el) { el.value = '0'; el.disabled = false; }
+  });
+
+  // Also zero region temporarily to bypass Bihar disable logic
+  const regionEl = document.getElementById('pi-region');
+  const savedRegion = regionEl ? regionEl.value : 'normal';
+  // We keep region as-is for display but discounts are cleared
+
+  // Recalculate price with zero discounts
+  if (typeof calcPrice === 'function') { try { calcPrice(); } catch(e){} }
+  if (typeof calculatePrice === 'function') { try { calculatePrice(); } catch(e){} }
+
+  const piContent = document.getElementById('pi-content');
+
+  const _now = new Date();
+  const _dd = String(_now.getDate()).padStart(2,'0');
+  const _mm = String(_now.getMonth()+1).padStart(2,'0');
+  const _yyyy = _now.getFullYear();
+  const _dateStr = _dd + '-' + _mm + '-' + _yyyy;
+
+  // Build Bihar print window using buildPIPrintHTML (which reads from form)
+  const win = window.open('', '_blank', 'width=900,height=700');
+
+  // Get current buildPIPrintHTML output — discounts are now zeroed
+  const biharBodyHTML = buildPIPrintHTML();
+
+  // Restore saved discount values
+  fields.forEach(function(id, i){
+    const el = document.getElementById(id);
+    if (el) el.value = savedVals[i];
+  });
+  // Restore price calculation
+  if (typeof calcPrice === 'function') { try { calcPrice(); } catch(e){} }
+  if (typeof calculatePrice === 'function') { try { calculatePrice(); } catch(e){} }
+
+  const piNumEl = piContent ? piContent.querySelector('[style*="font-size:20px"]') : null;
+  const piNum = piNumEl ? piNumEl.textContent.trim() : 'PI';
+
+  win.document.write(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>${piNum}_Bihar_${_dateStr} - Raunaq Paint Industry</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 18mm 16mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 12pt; color: #000; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .pi-header { background: #1C1410; color: #fff; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; border-radius: 6px 6px 0 0; }
+  .pi-header .company-name { font-size: 18pt; font-weight: 700; letter-spacing: -0.5px; }
+  .pi-header .company-addr { font-size: 8pt; opacity: 0.75; margin-top: 3px; }
+  .pi-header .pi-ref { text-align: right; }
+  .pi-header .pi-label { font-size: 8pt; text-transform: uppercase; letter-spacing: 1px; opacity: 0.65; }
+  .pi-header .pi-num { font-size: 16pt; font-weight: 700; }
+  .pi-header .pi-date { font-size: 9pt; opacity: 0.7; margin-top: 2px; }
+  .pi-meta { background: #FEF3C7; border: 1px solid #F59E0B; border-top: none; display: grid; grid-template-columns: 1fr 1fr; gap: 0; padding: 10px 20px; }
+  .pi-meta-section { padding: 0 10px 0 0; }
+  .pi-meta-section + .pi-meta-section { border-left: 1px solid #F59E0B; padding: 0 0 0 16px; }
+  .meta-label { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 1px; color: #555; margin-bottom: 3px; font-weight: 600; }
+  .meta-value { font-size: 13pt; font-weight: 700; color: #000; }
+  .meta-sub { font-size: 9pt; color: #333; margin-top: 2px; }
+  .bihar-notice { background: #FEF3C7; border: 1.5px solid #F59E0B; border-radius: 5px; padding: 6px 14px; font-size: 9pt; font-weight: 700; color: #92400E; margin-bottom: 10px; text-align: center; letter-spacing: 0.5px; }
+  .pi-table-wrap { border: 1px solid #d8cfc5; border-top: none; padding: 14px 20px 10px; }
+  table.items { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+  table.items thead tr { background: #f2ede8; border-bottom: 2px solid #1C1410; }
+  table.items th { padding: 7px 10px; font-size: 8.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #000; }
+  table.items th.r { text-align: right; }
+  table.items th.c { text-align: center; }
+  table.items td { padding: 8px 10px; font-size: 10.5pt; border-bottom: 1px solid #e8e0d8; color: #000; vertical-align: middle; }
+  table.items td.r { text-align: right; }
+  table.items td.c { text-align: center; }
+  table.items td.bold { font-weight: 700; }
+  table.items tr:last-child td { border-bottom: none; }
+  .total-bar { border-top: 2px solid #1C1410; padding-top: 10px; display: flex; justify-content: flex-end; margin-top: 4px; }
+  .total-box { text-align: right; }
+  .total-label { font-size: 8pt; text-transform: uppercase; letter-spacing: 1px; color: #555; }
+  .total-value { font-size: 22pt; font-weight: 700; color: #000; letter-spacing: -0.5px; }
+  .total-sub { font-size: 8.5pt; color: #333; margin-top: 3px; }
+  .outstanding-bar { margin-top: 10px; padding: 8px 14px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; border: 1.5px solid; }
+  .outstanding-bar.red { border-color: #b91c1c; background: #fff0f0; }
+  .outstanding-bar.green { border-color: #15803d; background: #f0fff4; }
+  .outstanding-bar .out-label { font-size: 9.5pt; font-weight: 700; color: #000; }
+  .outstanding-bar .out-value { font-size: 14pt; font-weight: 700; color: #000; }
+  .comment-bar { margin-top: 8px; padding: 7px 14px; background: #fffbeb; border: 1px solid #d97706; border-radius: 4px; }
+  .comment-bar .comment-label { font-size: 7.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #000; margin-bottom: 2px; }
+  .comment-bar .comment-text { font-size: 10pt; color: #000; }
+  .pi-footer { background: #f2ede8; border: 1px solid #d8cfc5; border-top: none; border-radius: 0 0 6px 6px; padding: 8px 20px; font-size: 8.5pt; color: #333; line-height: 1.5; }
+  .pi-footer strong { color: #000; }
+  @media print { body { margin: 0; } .no-print { display: none !important; } }
+</style>
+</head>
+<body>
+<div class="bihar-notice">⚠ Bihar / Jharkhand Rate — No Discounts Applied &nbsp;|&nbsp; Date: ${_dateStr}</div>
+${biharBodyHTML}
+<div class="no-print" style="text-align:center;margin:24px 0;">
+  <button onclick="window.print()" style="background:#92400E;color:#fff;border:none;padding:10px 28px;border-radius:6px;font-size:13pt;cursor:pointer;font-weight:700;">🖨 Print Bihar PI / Save as PDF</button>
+  <button onclick="window.close()" style="background:#888;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-size:13pt;cursor:pointer;font-weight:700;margin-left:12px;">✕ Close</button>
+</div>
+</body>
+</html>`);
+  win.document.close();
+  win.focus();
+  win.onload = function() { setTimeout(function(){ win.print(); }, 400); };
+}
+
 function buildPIPrintHTML() {
   // Rebuild PI data from current form state (same as generatePI but formatted for A4 print)
   const client    = document.getElementById('pi-client')?.value.trim() || '';
@@ -4683,20 +4844,17 @@ function buildPIPrintHTML() {
 
   // Build rows HTML
   let rowsHTML = '';
-  // Primary row
+  // Primary row — now with DPL Rate column
   rowsHTML += '<tr>';
   rowsHTML += '<td>1</td>';
   rowsHTML += '<td class="bold">' + productText + '</td>';
   rowsHTML += '<td>' + (shade || '—') + '</td>';
   rowsHTML += '<td class="c">' + packText + '</td>';
   rowsHTML += '<td class="c">' + qty + '</td>';
+  rowsHTML += '<td class="r" style="color:#666;">' + (dpl > 0 ? fmtAmt(dpl) : '—') + '</td>';
   rowsHTML += '<td class="r bold">' + fmtAmt(finalRate) + '</td>';
   rowsHTML += '<td class="r bold">' + fmtAmt(primaryTotal) + '</td>';
   rowsHTML += '</tr>';
-  // Discount note row
-  if (discNote) {
-    rowsHTML += '<tr class="disc-row"><td></td><td colspan="6"><i>' + discNote + '</i></td></tr>';
-  }
   // Extra rows
   extraRows.forEach(function(r, i) {
     rowsHTML += '<tr>';
@@ -4705,10 +4863,39 @@ function buildPIPrintHTML() {
     rowsHTML += '<td>' + (r.shade || '—') + '</td>';
     rowsHTML += '<td class="c">' + r.packText + '</td>';
     rowsHTML += '<td class="c">' + r.qty + '</td>';
+    rowsHTML += '<td class="r" style="color:#666;">' + (r.dpl > 0 ? fmtAmt(r.dpl) : '—') + '</td>';
     rowsHTML += '<td class="r bold">' + fmtAmt(r.rate) + '</td>';
     rowsHTML += '<td class="r bold">' + fmtAmt(r.amount) + '</td>';
     rowsHTML += '</tr>';
   });
+
+  // Build discount breakdown box (shown at bottom of PI only when discounts exist)
+  let discountBoxHTML = '';
+  const hasAnyDisc = discPerLitre > 0 || discTrade > 0 || discLoyalty > 0 || discCash > 0;
+  if (hasAnyDisc) {
+    // Recompute waterfall to get saved amounts for print
+    let _p = dpl;
+    let discRows = '';
+    const _discRow = (label, pct, savedAmt, afterRate) =>
+      '<tr>' +
+        '<td style="padding:5px 12px;font-size:9pt;color:#333;border-bottom:1px solid #ede8e2;">' + label + '</td>' +
+        '<td style="padding:5px 12px;font-size:9pt;text-align:center;font-weight:700;color:#b45309;border-bottom:1px solid #ede8e2;">' + pct + '</td>' +
+        '<td style="padding:5px 12px;font-size:9pt;text-align:right;font-weight:700;color:#b91c1c;border-bottom:1px solid #ede8e2;">−₹' + savedAmt.toFixed(2) + '</td>' +
+        '<td style="padding:5px 12px;font-size:9pt;text-align:right;font-weight:700;color:#15803d;border-bottom:1px solid #ede8e2;">₹' + afterRate.toFixed(2) + '</td>' +
+      '</tr>';
+
+    discRows += '<tr style="background:#f2ede8;"><th style="padding:5px 12px;font-size:8pt;text-align:left;letter-spacing:0.6px;color:#555;">Discount Step</th><th style="padding:5px 12px;font-size:8pt;text-align:center;color:#555;">Rate</th><th style="padding:5px 12px;font-size:8pt;text-align:right;color:#555;">Saved / Unit</th><th style="padding:5px 12px;font-size:8pt;text-align:right;color:#555;">Rate After</th></tr>';
+
+    if (discPerLitre > 0) { const prev = _p; _p -= discPerLitre; discRows += _discRow('Per Litre Discount', '−₹' + discPerLitre.toFixed(2) + ' /L', prev - _p, _p); }
+    if (discTrade > 0)    { const prev = _p; _p -= _p * discTrade / 100; discRows += _discRow('Trade Discount', '−' + discTrade + '%', prev - _p, _p); }
+    if (discLoyalty > 0)  { const prev = _p; _p -= _p * discLoyalty / 100; discRows += _discRow('Loyalty Discount', '−' + discLoyalty + '%', prev - _p, _p); }
+    if (discCash > 0)     { const prev = _p; _p -= _p * discCash / 100; discRows += _discRow('Cash Discount', '−' + discCash + '%', prev - _p, _p); }
+
+    discountBoxHTML = '<div style="margin-top:10px;border:1.5px solid #d8cfc5;border-radius:5px;overflow:hidden;">' +
+      '<div style="background:#f2ede8;padding:6px 12px;font-size:8pt;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#555;border-bottom:1px solid #d8cfc5;">Discount Breakdown (Primary Product · DPL: <strong>₹' + dpl.toFixed(2) + '</strong>)</div>' +
+      '<table style="width:100%;border-collapse:collapse;">' + discRows + '</table>' +
+      '</div>';
+  }
 
   const outstandingHTML = outstanding > 0
     ? '<div class="outstanding-bar red"><span class="out-label">⚠ Customer Outstanding Balance</span><span class="out-value">' + fmtAmt(outstanding) + '</span></div>'
@@ -4738,7 +4925,7 @@ function buildPIPrintHTML() {
 
   '<div class="pi-table-wrap">' +
     '<table class="items"><thead><tr>' +
-    '<th>#</th><th>Product</th><th>Shade</th><th class="c">Pack</th><th class="c">Qty</th><th class="r">Rate (₹)</th><th class="r">Amount (₹)</th>' +
+    '<th>#</th><th>Product</th><th>Shade</th><th class="c">Pack</th><th class="c">Qty</th><th class="r">DPL Rate (₹)</th><th class="r">Net Rate (₹)</th><th class="r">Amount (₹)</th>' +
     '</tr></thead><tbody>' + rowsHTML + '</tbody></table>' +
 
     '<div class="total-bar"><div class="total-box">' +
@@ -4747,10 +4934,14 @@ function buildPIPrintHTML() {
     '<div class="total-sub">Freight: <strong>' + freightType + (freightAmt > 0 ? ' ₹' + freightAmt.toLocaleString('en-IN') : '') + '</strong> &nbsp;·&nbsp; Subject to GST if applicable</div>' +
     '</div></div>' +
 
-    outstandingHTML + commentHTML +
+    discountBoxHTML + outstandingHTML + commentHTML +
   '</div>' +
 
-  '<div class="pi-footer"><strong>Note:</strong> This is a Proforma Invoice only. Actual billing will be done in Tally. Prices are subject to change without prior notice. Quantities subject to ±10% variance.</div>';
+  '<div class="pi-footer"><strong>Note:</strong> This is a Proforma Invoice only. Actual billing will be done in Tally. Prices are subject to change without prior notice. Quantities subject to ±10% variance.</div>' +
+  '<div style="background:#1C1410;color:#fff;border-radius:0 0 6px 6px;padding:12px 20px;display:flex;justify-content:space-between;align-items:center;">' +
+    '<div style="font-size:9pt;text-transform:uppercase;letter-spacing:1.5px;opacity:0.65;">Total Payable Amount (incl. all items)</div>' +
+    '<div style="font-size:22pt;font-weight:700;letter-spacing:-0.5px;">' + fmtAmt(grandTotal) + '</div>' +
+  '</div>';
 }
 
 // ============================================================
