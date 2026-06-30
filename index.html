@@ -30,12 +30,47 @@ function fmtDateOnly(d) {
 function nowDate()     { return fmtDateOnly(); }
 function nowDateTime() { return fmtDate(); }
 
+// Parses dd-mm-yyyy, "dd-mm-yyyy hh:mm", yyyy-mm-dd, or any other
+// Date-parseable string into a JS Date (date-only, time stripped to local
+// midnight is NOT enforced here — callers needing day-level comparisons
+// should compare Y/M/D components directly, as the helpers below do).
+function _parseFlexDate(s) {
+  if (!s) return null;
+  const dmy = String(s).match(/^(\d{2})-(\d{2})-(\d{4})/);
+  if (dmy) return new Date(+dmy[3], +dmy[2] - 1, +dmy[1]);
+  const ymd = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (ymd) return new Date(+ymd[1], +ymd[2] - 1, +ymd[3]);
+  const d = new Date(s);
+  return isNaN(d) ? null : d;
+}
+
+// Quick date-range filter shared by Final PI Database / Order Register /
+// anywhere else that offers a Today / Yesterday / This Month dropdown.
+// `range` is '', 'today', 'yesterday', or 'this_month'.
+function _matchesQuickDateRange(dateValue, range) {
+  if (!range) return true;
+  const d = (dateValue instanceof Date) ? dateValue : _parseFlexDate(dateValue);
+  if (!d) return false;
+  const now = new Date();
+  if (range === 'today') {
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  }
+  if (range === 'yesterday') {
+    const y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    return d.getFullYear() === y.getFullYear() && d.getMonth() === y.getMonth() && d.getDate() === y.getDate();
+  }
+  if (range === 'this_month') {
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  }
+  return true;
+}
+
 
 /* Tailwind CDN — development only; harmless warning suppressed */
 </script>
-<script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
 <script>
-  // Suppress CDN production warning
+  // Suppress CDN production warning — MUST run before the CDN script below loads,
+  // otherwise the warning fires once before this override is installed.
   (function() {
     const _warn = console.warn.bind(console);
     console.warn = function(...args) {
@@ -43,6 +78,9 @@ function nowDateTime() { return fmtDate(); }
       _warn(...args);
     };
   })();
+</script>
+<script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+<script>
   tailwind.config={corePlugins:{preflight:false}};
 </script>
 <style>
@@ -122,7 +160,7 @@ function nowDateTime() { return fmtDate(); }
   .section-sub { font-size: 12.5px; color: var(--ink-muted); }
 
   .data-table { width: 100%; border-collapse: collapse; }
-  .data-table th { padding: 10px 14px; text-align: left; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-muted); background: var(--stone-light); border-bottom: 1px solid var(--stone); }
+  .data-table th { padding: 10px 14px; text-align: left; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-muted); background: var(--stone-light); border-bottom: 1px solid var(--stone); position: sticky; top: 0; z-index: 5; }
   .data-table th:first-child { border-radius: 8px 0 0 8px; }
   .data-table th:last-child { border-radius: 0 8px 8px 0; }
   .data-table td { padding: 11px 14px; font-size: 13.5px; border-bottom: 1px solid var(--stone-light); color: var(--ink); }
@@ -133,11 +171,39 @@ function nowDateTime() { return fmtDate(); }
   .tab-btn { padding: 7px 16px; border-radius: 7px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; transition: all 0.15s; background: transparent; color: var(--ink-muted); }
   .tab-btn.active { background: var(--warm-white); color: var(--ink); box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
 
-  .page { display: none; }
+  .page { display: none; position: relative; min-height: 200px; }
   .page.active { display: block; }
   .divider { border: none; border-top: 1px solid var(--stone); margin: 20px 0; }
 
   .toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; border-radius: 10px; font-size: 13.5px; font-weight: 500; color: #fff; box-shadow: 0 8px 24px rgba(0,0,0,0.15); z-index: 9999; transition: all 0.3s ease; transform: translateY(80px); opacity: 0; }
+
+  /* ═══ GLOBAL LOADING OVERLAY (data sync from Google Sheets) ═══ */
+  #global-loader { position: fixed; inset: 0; z-index: 100000; background: rgba(28,20,16,0.55); backdrop-filter: blur(2px); display: none; align-items: center; justify-content: center; }
+  #global-loader.show { display: flex; }
+  .gl-card { background: var(--warm-white); border-radius: 16px; padding: 28px 36px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); display: flex; flex-direction: column; align-items: center; gap: 14px; min-width: 220px; }
+  .gl-spinner { width: 42px; height: 42px; border-radius: 50%; border: 4px solid var(--stone); border-top-color: var(--saffron); animation: gl-spin 0.8s linear infinite; }
+  @keyframes gl-spin { to { transform: rotate(360deg); } }
+  .gl-text { font-size: 13px; font-weight: 600; color: var(--ink-soft); text-align: center; }
+  .gl-sub { font-size: 11px; color: var(--ink-muted); text-align: center; }
+
+  /* ═══ PER-PAGE MODULE-SWITCH LOADER (lightweight, in-content) ═══ */
+  .page-loading-spinner { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; gap: 12px; }
+  .page-loading-spinner .gl-spinner { width: 34px; height: 34px; border-width: 3px; }
+  .page-loading-spinner .gl-text { font-size: 12.5px; color: var(--ink-muted); font-weight: 500; }
+
+  /* ═══ TOP PROGRESS BAR — animates while switching modules, for a smooth feel ═══ */
+  #page-progress-bar { position: fixed; top: 0; left: 0; height: 3px; width: 0%; background: linear-gradient(90deg, var(--saffron), var(--saffron-light)); z-index: 100001; opacity: 0; transition: width 0.22s ease, opacity 0.25s ease; box-shadow: 0 0 8px rgba(232,113,26,0.6); }
+  #page-progress-bar.active { opacity: 1; }
+
+  /* ═══ STICKY TABLE HEADER GHOST OVERLAY ═══
+     Many tables live inside a plain `overflow-x:auto` wrapper while the
+     PAGE itself (not the wrapper) scrolls vertically. In that situation
+     `position:sticky` on <th> cannot work (the wrapper becomes the nearest
+     scrolling ancestor but never actually scrolls vertically itself), so a
+     lightweight cloned header is fixed to the top of the viewport instead,
+     mirroring the live header's column widths and horizontal scroll. */
+  .sticky-thead-ghost { position: fixed; overflow: hidden; z-index: 45; display: none; box-shadow: 0 2px 8px rgba(28,20,16,0.10); }
+  .sticky-thead-ghost table { border-collapse: collapse; table-layout: fixed; margin: 0; }
   .toast.show { transform: translateY(0); opacity: 1; }
   .toast.success { background: var(--green-accent); }
   .toast.error { background: var(--red-accent); }
@@ -309,7 +375,7 @@ function nowDateTime() { return fmtDate(); }
   .pls-group-label { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--saffron); margin-bottom: 8px; }
   .pls-shade-text { font-size: 11.5px; color: var(--ink-muted); margin-bottom: 10px; line-height: 1.6; max-width: 700px; }
   .pls-price-table { width: 100%; border-collapse: collapse; }
-  .pls-price-table th { padding: 8px 12px; text-align: right; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted); background: var(--stone-light); border-bottom: 1px solid var(--stone); white-space: nowrap; }
+  .pls-price-table th { padding: 8px 12px; text-align: right; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted); background: var(--stone-light); border-bottom: 1px solid var(--stone); white-space: nowrap; position: sticky; top: 0; z-index: 5; }
   .pls-price-table th:first-child { text-align: left; border-radius: 6px 0 0 6px; }
   .pls-price-table th:last-child { border-radius: 0 6px 6px 0; }
   .pls-price-table td { padding: 10px 12px; font-size: 13.5px; border-bottom: 1px solid var(--stone-light); text-align: right; color: var(--ink); }
@@ -331,6 +397,18 @@ function nowDateTime() { return fmtDate(); }
 </style>
 </head>
 <body>
+
+<!-- ═══ TOP PROGRESS BAR — animates while switching modules ═══ -->
+<div id="page-progress-bar"></div>
+
+<!-- ═══ GLOBAL LOADING OVERLAY — shown while data syncs from Google Sheets ═══ -->
+<div id="global-loader">
+  <div class="gl-card">
+    <div class="gl-spinner"></div>
+    <div class="gl-text" id="global-loader-text">Loading data…</div>
+    <div class="gl-sub" id="global-loader-sub">Please wait, fetching the latest records from Google Sheets</div>
+  </div>
+</div>
 
 <!-- ═══════════════════════════════════════════════════════ -->
 <!-- LOGIN SCREEN                                           -->
@@ -355,9 +433,10 @@ function nowDateTime() { return fmtDate(); }
       <div class="login-title">Sign in to continue</div>
       <div class="login-error" id="login-error-msg"></div>
 
-      <!-- Quick login cards -->
+      <!-- Quick login cards — pre-fill username ONLY, password is never
+           auto-filled or auto-submitted (see quickLogin() fix) -->
       <div class="login-user-cards">
-        <div class="login-user-card" onclick="quickLogin('admin','admin123')">
+        <div class="login-user-card" onclick="quickLogin('admin')">
           <div class="luc-avatar" style="background:linear-gradient(135deg,#E8711A,#D4631A);">A</div>
           <div class="luc-name">Admin</div>
           <div class="luc-role">🔐 Administrator</div>
@@ -366,7 +445,7 @@ function nowDateTime() { return fmtDate(); }
             <span class="luc-perm" style="background:#FDECEA;color:#C0392B;">Can Delete</span>
           </div>
         </div>
-        <div class="login-user-card" onclick="quickLogin('richa','')">
+        <div class="login-user-card" onclick="quickLogin('richa')">
           <div class="luc-avatar" style="background:linear-gradient(135deg,#2D6A4F,#1e5035);">R</div>
           <div class="luc-name">Richa</div>
           <div class="luc-role">✏️ Data Entry</div>
@@ -380,7 +459,7 @@ function nowDateTime() { return fmtDate(); }
       </div>
       <div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px;padding:8px 13px;font-size:11.5px;color:#92400E;margin-bottom:14px;display:flex;align-items:center;gap:8px;">
         <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        <span>Click a card to pre-fill username. Enter your password below and click <strong>Sign In</strong>. Default: <code>admin / admin123</code> · <code>richa / richa123</code></span>
+        <span>Click a card to pre-fill the username, then type your password and click <strong>Sign In</strong>.</span>
       </div>
 
       <div style="margin-bottom:14px;">
@@ -932,8 +1011,32 @@ function nowDateTime() { return fmtDate(); }
           New Order
         </button>
       </div>
+
+      <!-- Search & Filters -->
+      <div class="card" style="margin-bottom:16px;">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+          <input type="text" id="or-search" class="form-input" placeholder="Search client, product, shade…" oninput="renderOrderTable()" style="max-width:260px;" />
+          <select id="or-filter-sp" class="form-input" onchange="renderOrderTable()" style="max-width:170px;">
+            <option value="">All Salespersons</option>
+          </select>
+          <select id="or-filter-daterange" class="form-input" onchange="renderOrderTable()" style="max-width:140px;">
+            <option value="">Any Date</option>
+            <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="this_month">This Month</option>
+          </select>
+          <select id="or-filter-region" class="form-input" onchange="renderOrderTable()" style="max-width:150px;">
+            <option value="">All Regions</option>
+            <option value="normal">Normal</option>
+            <option value="bihar">Bihar / Jharkhand</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="clearOrderFilters()">Clear</button>
+        </div>
+      </div>
+
       <div class="card"><div id="order-table-container"><div style="text-align:center;padding:48px 0;color:var(--ink-muted);">No orders saved yet.</div></div></div>
     </div>
+
 
     <!-- ===================== CLIENTS (LEGACY - HIDDEN) ===================== -->
     <div id="page-clients" class="page" style="display:none!important;">
@@ -1059,7 +1162,7 @@ function nowDateTime() { return fmtDate(); }
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
         <div>
           <div class="section-heading">Salesperson Sales Report</div>
-          <div class="section-sub">From Final PI Database — qty sold per salesperson with shade, pack size &amp; product breakdown</div>
+          <div class="section-sub">From Final PI Database — qty sold per salesperson, by customer, product &amp; shade · filter by month or week</div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn btn-outline btn-sm" onclick="exportSPReport()">
@@ -1086,6 +1189,12 @@ function nowDateTime() { return fmtDate(); }
               <option value="">All Salespersons</option>
             </select>
           </div>
+          <div style="min-width:170px;">
+            <label class="form-label">Customer</label>
+            <select id="spr-filter-customer" class="form-input" onchange="renderSPReport()">
+              <option value="">All Customers</option>
+            </select>
+          </div>
           <div style="min-width:150px;">
             <label class="form-label">Product</label>
             <select id="spr-filter-product" class="form-input" onchange="renderSPReport()">
@@ -1100,6 +1209,17 @@ function nowDateTime() { return fmtDate(); }
               <option value="4">April</option><option value="5">May</option><option value="6">June</option>
               <option value="7">July</option><option value="8">August</option><option value="9">September</option>
               <option value="10">October</option><option value="11">November</option><option value="12">December</option>
+            </select>
+          </div>
+          <div style="min-width:130px;">
+            <label class="form-label">Week</label>
+            <select id="spr-filter-week" class="form-input" onchange="renderSPReport()">
+              <option value="">All Weeks</option>
+              <option value="1">Week 1 (1–7)</option>
+              <option value="2">Week 2 (8–14)</option>
+              <option value="3">Week 3 (15–21)</option>
+              <option value="4">Week 4 (22–28)</option>
+              <option value="5">Week 5 (29–31)</option>
             </select>
           </div>
           <div style="min-width:100px;">
@@ -2156,6 +2276,15 @@ SLV-001,Mineral Turpentine Oil,95,ltr,Local Supplier</pre>
       <div class="card" style="margin-bottom:16px;">
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
           <input type="text" id="fpi-search" class="form-input" placeholder="Search customer, product, shade…" oninput="renderFinalPITable()" style="max-width:260px;" />
+          <select id="fpi-filter-sp" class="form-input" onchange="renderFinalPITable()" style="max-width:170px;">
+            <option value="">All Salespersons</option>
+          </select>
+          <select id="fpi-filter-daterange" class="form-input" onchange="renderFinalPITable()" style="max-width:140px;">
+            <option value="">Any Date</option>
+            <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="this_month">This Month</option>
+          </select>
           <select id="fpi-filter-month" class="form-input" onchange="renderFinalPITable()" style="max-width:150px;">
             <option value="">All Months</option>
             <option value="1">January</option><option value="2">February</option><option value="3">March</option>
@@ -3557,25 +3686,40 @@ async function loadAllFromSheets() {
   if (!_sheetsConnected) { showToast('Google Sheets URL not configured.','error'); return; }
 
   showToast('🔄 Loading data from Google Sheets…', 'info');
+  showGlobalLoader('Syncing with Google Sheets…', 'Loading customers, prices, orders, shades & more — please wait');
 
-  // Try once. If it fails, wait 5s for cold-start and try once more. That's it.
-  let res = await _sheetsGet('loadAll');
-  if (!res || !res.success) {
-    showToast('⏳ Waiting for Google Sheets to wake up…', 'info');
-    await new Promise(r => setTimeout(r, 5000));
-    res = await _sheetsGet('loadAll');
+  try {
+    // Try once. If it fails, wait 5s for cold-start and try once more. That's it.
+    let res = await _sheetsGet('loadAll');
+    if (!res || !res.success) {
+      showToast('⏳ Waiting for Google Sheets to wake up…', 'info');
+      showGlobalLoader('Waking up Google Sheets…', 'This can take a few seconds on the first request — please wait');
+      await new Promise(r => setTimeout(r, 5000));
+      res = await _sheetsGet('loadAll');
+    }
+
+    if (!res || !res.success) {
+      const errMsg = res && res.error ? res.error : 'Network error — check your internet connection and the Apps Script URL.';
+      showToast('❌ Unable to load data from Google: ' + errMsg, 'error');
+      console.error('loadAllFromSheets failed:', res);
+      // Show a persistent banner so the user knows RM data is not loaded
+      const banner = document.getElementById('sheets-load-error-banner');
+      if (banner) { banner.style.display = 'block'; banner.textContent = '⚠️ Could not load RM Master and other data from Google Sheets. Click "Reload from Google" to retry.'; }
+      return;
+    }
+
+    await _applyLoadedSheetsData(res);
+  } finally {
+    // Always hide the overlay, whether the sync succeeded, failed, or threw —
+    // the user should never be stuck staring at a loading screen.
+    hideGlobalLoader();
   }
+}
 
-  if (!res || !res.success) {
-    const errMsg = res && res.error ? res.error : 'Network error — check your internet connection and the Apps Script URL.';
-    showToast('❌ Unable to load data from Google: ' + errMsg, 'error');
-    console.error('loadAllFromSheets failed:', res);
-    // Show a persistent banner so the user knows RM data is not loaded
-    const banner = document.getElementById('sheets-load-error-banner');
-    if (banner) { banner.style.display = 'block'; banner.textContent = '⚠️ Could not load RM Master and other data from Google Sheets. Click "Reload from Google" to retry.'; }
-    return;
-  }
-
+// Applies the payload from a successful 'loadAll' Sheets fetch into the
+// in-memory stores and re-renders every module. Split out from
+// loadAllFromSheets() so the loader/try-finally wrapper stays simple.
+async function _applyLoadedSheetsData(res) {
   // Clients — authoritative from Sheets
   if (Array.isArray(res.sessionClients)) {
     sessionClients = res.sessionClients.map(r => ({
@@ -3606,6 +3750,17 @@ async function loadAllFromSheets() {
 
   // Costing DB
   if (res.costingDB && res.costingDB.length) {
+    // PERF FIX: previously did `(res.costingRMRows||[]).filter(...)` INSIDE
+    // this .map() — an O(costingDB × costingRMRows) scan running right after
+    // every login/data-load. With real data this alone could lock up the
+    // page for several seconds right after signing in. Group once into a
+    // Map up front instead, so each costing row is an O(1) lookup.
+    const rmRowsByCostingId = new Map();
+    (res.costingRMRows || []).forEach(rm => {
+      const key = rm.CostingID || rm.costingId;
+      if (!rmRowsByCostingId.has(key)) rmRowsByCostingId.set(key, []);
+      rmRowsByCostingId.get(key).push(rm);
+    });
     costingDB = res.costingDB.map(r => ({
       id: parseInt((r.CostingID || r.costingId || '').replace('CST-',''))||0,
       costingId: r.CostingID || r.costingId,
@@ -3621,7 +3776,7 @@ async function loadAllFromSheets() {
       perLtrCost: parseFloat(r.Per_Ltr_Cost || r.perLtrCost)||0,
       discountPct: parseFloat(r.Discount_Pct_Used || r.discountPct)||35,
       date: r.date ? (function(d){ const dmy=String(d).match(/^(\d{2})-(\d{2})-(\d{4})/); if(dmy)return dmy[1]; const dt=new Date(d); return isNaN(dt)?d:(String(dt.getDate()).padStart(2,'0')+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+dt.getFullYear()); })(r.date) : (r.Saved_At ? fmtDateOnly(r.Saved_At) : fmtDateOnly()),
-      rmDetails: (res.costingRMRows||[]).filter(rm=>(rm.CostingID||rm.costingId)===(r.CostingID||r.costingId)).map(rm=>({
+      rmDetails: (rmRowsByCostingId.get(r.CostingID || r.costingId) || []).map(rm=>({
         rmCode: rm.RM_Code||rm.rmCode, rmName: rm.RM_Name||rm.rmName,
         price: parseFloat(rm.Price_Per_Kg||rm.price)||0, qty: parseFloat(rm.Qty_Kg||rm.qty)||0, amount: parseFloat(rm.Amount||rm.amount)||0
       })),
@@ -4005,6 +4160,67 @@ let sessionClients = [];
 let editingClientIndex = -1;
 
 // ============================================================
+// LOADING INDICATORS
+// — global overlay: full Google Sheets data sync (login / manual reload)
+// — page overlay: brief spinner while a module's data renders, so users
+//   never see a half-built / stale page while switching modules
+// ============================================================
+function showGlobalLoader(text, sub) {
+  const el = document.getElementById('global-loader');
+  if (!el) return;
+  const t = document.getElementById('global-loader-text');
+  const s = document.getElementById('global-loader-sub');
+  if (t) t.textContent = text || 'Loading data…';
+  if (s) s.textContent = sub || 'Please wait, fetching the latest records from Google Sheets';
+  el.classList.add('show');
+}
+function hideGlobalLoader() {
+  const el = document.getElementById('global-loader');
+  if (el) el.classList.remove('show');
+}
+
+function _pageLoadingOverlay(show, pageEl) {
+  if (!pageEl) return;
+  let ov = pageEl.querySelector(':scope > .page-switch-overlay');
+  if (show) {
+    if (!ov) {
+      ov = document.createElement('div');
+      ov.className = 'page-switch-overlay';
+      ov.style.cssText = 'position:absolute;inset:0;background:var(--cream);z-index:40;display:flex;align-items:center;justify-content:center;';
+      ov.innerHTML = '<div class="page-loading-spinner"><div class="gl-spinner"></div><div class="gl-text">Loading module…</div></div>';
+      pageEl.appendChild(ov);
+    }
+  } else if (ov) {
+    ov.remove();
+  }
+}
+
+// Slim top progress bar — purely cosmetic, gives instant feedback the
+// moment a module switch starts, then sweeps to completion and fades.
+let _pageProgressHideTimer = null;
+function _pageProgressStart() {
+  const bar = document.getElementById('page-progress-bar');
+  if (!bar) return;
+  clearTimeout(_pageProgressHideTimer);
+  bar.style.transition = 'none';
+  bar.style.width = '0%';
+  bar.classList.add('active');
+  // Force reflow so the width:0% actually takes effect before animating up
+  void bar.offsetWidth;
+  bar.style.transition = '';
+  requestAnimationFrame(() => { bar.style.width = '70%'; });
+}
+function _pageProgressFinish() {
+  const bar = document.getElementById('page-progress-bar');
+  if (!bar) return;
+  bar.style.width = '100%';
+  _pageProgressHideTimer = setTimeout(() => {
+    bar.classList.remove('active');
+    setTimeout(() => { bar.style.width = '0%'; }, 250);
+  }, 200);
+}
+
+// ============================================================
 // NAVIGATION
 // ============================================================
 function showPage(page) {
@@ -4013,6 +4229,14 @@ function showPage(page) {
   const pageEl = document.getElementById('page-' + page);
   if (!pageEl) return;
   pageEl.classList.add('active');
+
+  // Smooth-loading feedback: a slim progress bar sweeps in immediately,
+  // and a brief in-page spinner covers the module while its (potentially
+  // heavy) data renders — so users never see a blank / stale page while
+  // switching modules. The render work below is deferred one tick so the
+  // browser gets a chance to paint both of these first.
+  _pageProgressStart();
+  _pageLoadingOverlay(true, pageEl);
 
   const titles = {
     'dashboard':             ['Dashboard', 'Overview of today\'s activity'],
@@ -4036,7 +4260,7 @@ function showPage(page) {
     'production-sheet':      ['Production Sheet Generator', 'Search formulation → load RM → generate print-ready sheet'],
     'bulk-import':           ['Bulk Import', 'Download sample CSV · fill your data · upload in bulk'],
     'stock-planner':         ['Stock Planner', 'Monthly shade & pack-size quantities from Final PI · top sellers highlighted'],
-    'salesperson-report':    ['Salesperson Sales Report', 'Qty sold per salesperson with shade, pack size & product breakdown — from Final PI'],
+    'salesperson-report':    ['Salesperson Sales Report', 'Qty sold per salesperson, by customer, product & shade — month/week filters'],
     'users-management':      ['Users & Access', 'Manage login credentials, roles and permissions for all users'],
   };
   document.getElementById('page-title').textContent = titles[page]?.[0] || page;
@@ -4048,25 +4272,178 @@ function showPage(page) {
     if (oc.includes("'" + page + "'")) n.classList.add('active');
   });
 
-  if (page === 'price-list') { renderAllPriceTables(); filterPriceTables(); }
-  if (page === 'rm-master') renderRMTable();
-  if (page === 'shades-db') { _populateShadesProductFilter(); renderShadesTable(''); }
-  if (page === 'costing-master') renderCostingMaster();
-  if (page === 'formulation-costing') initCostingFormIfEmpty();
-  if (page === 'profit-loss') renderPLDashboard();
-  if (page === 'system-options') renderUserMgmtTable();
-  if (page === 'users-management') renderUserMgmtTableFull();
-  if (page === 'production-sheet') setTimeout(() => { const c = document.getElementById('ps-costing-results'); if(c && !c.innerHTML.trim()) searchCostingForPS(); }, 80);
-  if (page === 'bulk-import') {
-    ['customers','rm','prices'].forEach(t => { const el=document.getElementById('bulk-tab-'+t); if(el) el.style.display='none'; });
-    const pi = document.getElementById('bulk-tab-pi'); if(pi) pi.style.display='';
-    document.querySelectorAll('#page-bulk-import .tab-btn').forEach((b,i) => { b.classList.toggle('active', i===0); });
-  }
-  renderOrderTable();
-  renderReports();
-  // Re-apply role permissions after page renders (dynamic content)
-  setTimeout(applyRolePermissions, 100);
+  // Guarantee the spinner/progress-bar actually PAINT before the (possibly
+  // heavy) synchronous render work below runs and blocks the main thread.
+  // A fixed setTimeout(30) wasn't reliable for this — the browser may not
+  // have had a paint cycle yet. Two nested rAFs guarantee at least one full
+  // paint has happened first, so the user always sees the spinner spinning
+  // instead of the page just looking stuck/frozen.
+  requestAnimationFrame(() => requestAnimationFrame(function() {
+    if (page === 'price-list') { renderAllPriceTables(); filterPriceTables(); }
+    if (page === 'rm-master') renderRMTable();
+    if (page === 'shades-db') { _populateShadesProductFilter(); renderShadesTable(''); }
+    if (page === 'costing-master') renderCostingMaster();
+    if (page === 'formulation-costing') initCostingFormIfEmpty();
+    if (page === 'profit-loss') renderPLDashboard();
+    if (page === 'system-options') renderUserMgmtTable();
+    if (page === 'users-management') renderUserMgmtTableFull();
+    if (page === 'production-sheet') setTimeout(() => { const c = document.getElementById('ps-costing-results'); if(c && !c.innerHTML.trim()) searchCostingForPS(); }, 80);
+    if (page === 'bulk-import') {
+      ['customers','rm','prices'].forEach(t => { const el=document.getElementById('bulk-tab-'+t); if(el) el.style.display='none'; });
+      const pi = document.getElementById('bulk-tab-pi'); if(pi) pi.style.display='';
+      document.querySelectorAll('#page-bulk-import .tab-btn').forEach((b,i) => { b.classList.toggle('active', i===0); });
+    }
+    // PERF FIX: these two used to run on EVERY single page switch, no matter
+    // which page was opened. renderOrderTable() in particular does an O(orders
+    // × finalized-PIs) scan to badge each row "In DB"/"Not Saved" — with real
+    // data that's thousands of comparisons that re-ran on every single click
+    // through the sidebar, which is exactly what was making the whole app
+    // feel like it froze when switching pages. Now they only run on the
+    // pages that actually display that data.
+    if (page === 'dashboard' || page === 'order-entry') renderOrderTable();
+    if (page === 'reports') renderReports();
+    // Re-apply role permissions after page renders (dynamic content)
+    setTimeout(applyRolePermissions, 100);
+
+    // Module data is now rendered — remove the loading spinner and
+    // complete the top progress bar.
+    _pageLoadingOverlay(false, pageEl);
+    _pageProgressFinish();
+
+    // Re-scan this module's tables for the sticky-header system below —
+    // its own MutationObserver/scroll listeners keep things in sync after
+    // this too, but kicking it here means the very first render is instant.
+    if (typeof _stickyHeadersRescan === 'function') _stickyHeadersRescan();
+  }));
 }
+
+// ============================================================
+// STICKY (FROZEN) TABLE HEADERS — every scrolling page
+// ------------------------------------------------------------
+// Plain CSS `position: sticky` on a <th> works fine when the table's
+// wrapper genuinely scrolls internally (e.g. the few panels that have an
+// explicit max-height + overflow-y:auto — CSS above already handles
+// those for free). But most tables in this app sit inside a simple
+// `overflow-x:auto` wrapper with NO fixed height, and the PAGE itself
+// scrolls — in that layout `position:sticky` on the header cannot work,
+// because the wrapper becomes the "nearest scrolling ancestor" for
+// sticky purposes without ever actually producing vertical scroll of its
+// own. The fix here is a lightweight cloned header ("ghost") that gets
+// fixed to the top of the viewport (just below the topbar) only while
+// the real header has scrolled out of view, with its column widths and
+// horizontal scroll position kept perfectly in sync with the live table.
+// ============================================================
+(function () {
+  let ghosts = []; // { table, wrapper, thead, ghostWrap, ghostTable, ghostThead }
+  let rescanTimer = null;
+
+  function _topbarBottom() {
+    const tb = document.querySelector('.topbar');
+    return tb ? tb.getBoundingClientRect().bottom : 0;
+  }
+
+  function _teardown() {
+    ghosts.forEach(g => g.ghostWrap.remove());
+    ghosts = [];
+  }
+
+  function _needsGhost(wrapper) {
+    // If the wrapper has genuine internal vertical scroll (a real bounded
+    // height panel), plain CSS sticky on its <th> already works correctly
+    // — skip those and only ghost the page-level-scroll tables.
+    return wrapper.scrollHeight <= wrapper.clientHeight + 2;
+  }
+
+  function _buildGhost(table, wrapper) {
+    const thead = table.querySelector('thead');
+    if (!thead) return null;
+    const ghostWrap = document.createElement('div');
+    ghostWrap.className = 'sticky-thead-ghost';
+    const ghostTable = document.createElement('table');
+    ghostTable.className = table.className;
+    const ghostThead = thead.cloneNode(true);
+    ghostTable.appendChild(ghostThead);
+    ghostWrap.appendChild(ghostTable);
+    document.body.appendChild(ghostWrap);
+    return { table, wrapper, thead, ghostWrap, ghostTable, ghostThead, widthsSynced: false };
+  }
+
+  function _syncWidths(g) {
+    const liveCells = g.thead.querySelectorAll('th');
+    const ghostCells = g.ghostThead.querySelectorAll('th');
+    if (!liveCells.length || liveCells.length !== ghostCells.length) return;
+    let total = 0;
+    liveCells.forEach((th, i) => {
+      const w = th.getBoundingClientRect().width;
+      ghostCells[i].style.width = w + 'px';
+      ghostCells[i].style.minWidth = w + 'px';
+      ghostCells[i].style.maxWidth = w + 'px';
+      total += w;
+    });
+    g.ghostTable.style.width = total + 'px';
+    g.widthsSynced = true;
+  }
+
+  function _updateGhost(g) {
+    const topLimit = _topbarBottom();
+    const theadRect = g.thead.getBoundingClientRect();
+    const wrapperRect = g.wrapper.getBoundingClientRect();
+    // Show the ghost only once the real header has scrolled above the
+    // topbar, and only while the table body still has rows in view below it.
+    const shouldShow = theadRect.top < topLimit - 1 && wrapperRect.bottom > topLimit + 24;
+
+    if (!shouldShow) {
+      if (g.ghostWrap.style.display !== 'none') g.ghostWrap.style.display = 'none';
+      return;
+    }
+    if (!g.widthsSynced || g.ghostWrap.style.display === 'none') _syncWidths(g);
+    g.ghostWrap.style.display = 'block';
+    g.ghostWrap.style.top = topLimit + 'px';
+    g.ghostWrap.style.left = wrapperRect.left + 'px';
+    g.ghostWrap.style.width = wrapperRect.width + 'px';
+    g.ghostTable.style.transform = 'translateX(' + (-g.wrapper.scrollLeft) + 'px)';
+  }
+
+  function _updateAll() { ghosts.forEach(_updateGhost); }
+
+  function _setupForActivePage() {
+    _teardown();
+    const pageEl = document.querySelector('.page.active');
+    if (!pageEl) return;
+    const tables = pageEl.querySelectorAll('table.data-table, table.pls-price-table');
+    tables.forEach(table => {
+      const wrapper = table.parentElement;
+      if (!wrapper) return;
+      if (!_needsGhost(wrapper)) return; // bounded-height panel — CSS sticky already handles it
+      const g = _buildGhost(table, wrapper);
+      if (g) ghosts.push(g);
+    });
+    _updateAll();
+  }
+
+  // Debounced rescan — exposed so showPage() can trigger an immediate one.
+  window._stickyHeadersRescan = function () {
+    clearTimeout(rescanTimer);
+    rescanTimer = setTimeout(_setupForActivePage, 60);
+  };
+
+  // Any scroll anywhere (the page itself, or a horizontally-scrolling
+  // wrapper) needs a position/visibility update. Scroll events don't
+  // bubble, but capture-phase listeners still fire for nested scrollers.
+  document.addEventListener('scroll', _updateAll, true);
+  window.addEventListener('resize', () => { ghosts.forEach(g => g.widthsSynced = false); _updateAll(); });
+
+  // Tables are frequently rebuilt via innerHTML (filters, search, imports,
+  // Sheets sync, etc.) — watch the app shell and silently re-attach ghosts
+  // whenever the active module's markup changes.
+  document.addEventListener('DOMContentLoaded', function () {
+    const shell = document.getElementById('app-shell');
+    if (!shell) return;
+    const observer = new MutationObserver(function () { window._stickyHeadersRescan(); });
+    observer.observe(shell, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    setTimeout(_setupForActivePage, 600);
+  });
+})();
 
 // ============================================================
 // PACK KEY HELPER
@@ -4541,6 +4918,13 @@ function generatePI() {
   }
   if (!shade) {
     showToast('Shade / Colour is required.', 'error'); return;
+  }
+  {
+    const _missingShadeRows = _extraRowsMissingShade();
+    if (_missingShadeRows.length) {
+      showToast('Shade / Colour is required for Product ' + (parseInt(_missingShadeRows[0]) + 1) + '. Please fill it in before generating the PI.', 'error');
+      return;
+    }
   }
   const groupWrap = document.getElementById('pi-group-wrap');
   if (groupWrap && groupWrap.style.display !== 'none') {
@@ -5183,7 +5567,7 @@ function addExtraProductRow() {
         </select>
       </div>
       <div style="position:relative;">
-        <label class="form-label" style="font-size:10px;">Shade</label>
+        <label class="form-label" style="font-size:10px;">Shade *</label>
         <input type="text" id="xp-shade-${id}" class="form-input" placeholder="Select product first…" style="font-size:13px;" autocomplete="off"
           oninput="xpFilterShade(${id},this.value)"
           onfocus="xpShowShade(${id})"
@@ -5509,9 +5893,41 @@ function _collectExtraRows() {
     const rate = dpl;
     const amount = rate * qty;
 
-    rows.push({ productText, shade: shade || '—', packText, qty, dpl, rate, amount, litres, unit: unit || 'L' });
+    // FIX: previously defaulted a missing shade to the literal dash string '—'
+    // (shade: shade || '—'), which then got saved as if it were a real shade
+    // value all the way into the Final PI database — that's the "DSH"/dash
+    // showing up where shade should be. Keep it as an empty string instead so
+    // it's correctly recognised as "missing" by validation and by the table
+    // renderer's own '—' display fallback (which only kicks in for truly
+    // empty values).
+    rows.push({ productText, shade, packText, qty, dpl, rate, amount, litres, unit: unit || 'L' });
   });
   return rows;
+}
+
+// Shade / Colour is a mandatory field on every product row of a PI — not
+// just the primary product. Without this check a user could add a second
+// or third product via "+ Add Product", fill in product/pack/qty/rate but
+// leave Shade blank, and that row would sail through _collectExtraRows()
+// (which only requires product+pack+qty+dpl) straight into the Final PI
+// database with shade:'' — which then renders as a bare dash ('—') in the
+// PI database / reports even though shade was supposed to be required.
+// Returns the list of extra-row ids (1-based row numbers) that have a
+// product selected but no shade entered.
+function _extraRowsMissingShade() {
+  const container = document.getElementById('pi-extra-products');
+  if (!container) return [];
+  const missing = [];
+  container.querySelectorAll('[id^="extra-row-"]').forEach(row => {
+    const idMatch = row.id.match(/extra-row-(\d+)/);
+    if (!idMatch) return;
+    const id = idMatch[1];
+    const productSel = document.getElementById('xp-product-' + id);
+    const shade = (document.getElementById('xp-shade-' + id)?.value || '').trim();
+    // Only flag rows the user has actually started filling in (product chosen)
+    if (productSel?.value && !shade) missing.push(id);
+  });
+  return missing;
 }
 
 function _clearExtraRows() {
@@ -5541,6 +5957,13 @@ function saveOrder() {
   }
   if (!shade) {
     showToast('Shade / Colour is required.', 'error'); return;
+  }
+  {
+    const _missingShadeRowsSave = _extraRowsMissingShade();
+    if (_missingShadeRowsSave.length) {
+      showToast('Shade / Colour is required for Product ' + (parseInt(_missingShadeRowsSave[0]) + 1) + '. Please fill it in before saving the order.', 'error');
+      return;
+    }
   }
   const _groupWrapSave = document.getElementById('pi-group-wrap');
   if (_groupWrapSave && _groupWrapSave.style.display !== 'none') {
@@ -5623,10 +6046,25 @@ function renderOrderTable() {
   const recent = document.getElementById('recent-orders-table');
   if (!sessionOrders.length) {
     const empty = `<div style="text-align:center;padding:40px 0;color:var(--ink-muted);font-size:13px;">No orders saved yet.</div>`;
-    container.innerHTML = empty;
-    recent.innerHTML = `<div style="text-align:center;padding:32px 0;color:var(--ink-muted);font-size:13px;opacity:0.6;">No orders yet. Create a PI to get started.</div>`;
+    if (container) container.innerHTML = empty;
+    if (recent) recent.innerHTML = `<div style="text-align:center;padding:32px 0;color:var(--ink-muted);font-size:13px;opacity:0.6;">No orders yet. Create a PI to get started.</div>`;
     return;
   }
+
+  // Populate the Order Register salesperson filter from whatever
+  // salespersons actually appear on saved orders (keeps current selection).
+  const orSpSel = document.getElementById('or-filter-sp');
+  if (orSpSel) {
+    const sps = [...new Set(sessionOrders.map(o => (o.sales||'').trim()).filter(Boolean))].sort();
+    const curSP = orSpSel.value;
+    orSpSel.innerHTML = '<option value="">All Salespersons</option>' +
+      sps.map(s => `<option value="${s}" ${s===curSP?'selected':''}>${s}</option>`).join('');
+  }
+
+  const orSearch = (document.getElementById('or-search')?.value || '').toLowerCase();
+  const orSPFilter = document.getElementById('or-filter-sp')?.value || '';
+  const orDateRangeFilter = document.getElementById('or-filter-daterange')?.value || '';
+  const orRegionFilter = document.getElementById('or-filter-region')?.value || '';
 
   // Helper: format any date string to dd-mm-yyyy hh:mm
   function _fmtOrderDate(d) {
@@ -5641,14 +6079,51 @@ function renderOrderTable() {
     return `${dd}-${mm}-${yyyy} ${hh}:${min}`;
   }
 
-  let rows = '';
-  const reversed = sessionOrders.slice().reverse();
-  reversed.forEach((o, reverseIdx) => {
-    const idx = sessionOrders.length - 1 - reverseIdx;
-    const isInDB = piFinalDB.some(p =>
-      (p.customerName||'').trim().toLowerCase() === (o.client||'').trim().toLowerCase() &&
-      (p.product||'').trim().toLowerCase() === (o.product||'').trim().toLowerCase() &&
-      (p.shade||'').trim().toLowerCase() === (o.shade||'').trim().toLowerCase()
+  // Filter sessionOrders while keeping each order's ORIGINAL array index —
+  // editOrderPI()/registerOrderToFinalDB() are called with that index, so it
+  // must stay correct even when a search/filter narrows the visible rows.
+  const filteredWithIdx = sessionOrders
+    .map((o, i) => ({ o, idx: i }))
+    .filter(({ o }) => {
+      const extraRows = o.extraRows || [];
+      const matchSearch = !orSearch ||
+        (o.client||'').toLowerCase().includes(orSearch) ||
+        (o.product||'').toLowerCase().includes(orSearch) ||
+        (o.shade||'').toLowerCase().includes(orSearch) ||
+        (o.sales||'').toLowerCase().includes(orSearch) ||
+        extraRows.some(r => (r.productText||'').toLowerCase().includes(orSearch) || (r.shade||'').toLowerCase().includes(orSearch));
+      const matchSP = !orSPFilter || (o.sales||'').trim() === orSPFilter;
+      const matchDateRange = _matchesQuickDateRange(_parseFlexDate(o.date), orDateRangeFilter);
+      const matchRegion = !orRegionFilter || (o.region||'normal') === orRegionFilter;
+      return matchSearch && matchSP && matchDateRange && matchRegion;
+    });
+
+  // PERF FIX: this whole block builds the full Order Register table (with a
+  // per-row "In DB" lookup against piFinalDB). The Dashboard page only has
+  // the small "recent" widget below — `container` is null there — so there
+  // is no point doing this work at all when only `recent` is needed. This
+  // alone used to run in full on every dashboard visit for nothing.
+  if (container && !filteredWithIdx.length) {
+    container.innerHTML = `<div style="text-align:center;padding:40px 0;color:var(--ink-muted);font-size:13px;">No orders match your search/filters.</div>`;
+  } else if (container) {
+    // PERF FIX: was piFinalDB.some(...) INSIDE the per-order loop below —
+    // an O(orders × finalized PIs) scan repeated on every render. With real
+    // data (hundreds of orders × thousands of finalized PIs) that's millions
+    // of string comparisons, freezing the page on every filter keystroke or
+    // page switch. Precomputing a Set once turns it into a single O(1) lookup
+    // per order instead.
+    const finalDBKeySet = new Set(piFinalDB.map(p =>
+      (p.customerName||'').trim().toLowerCase() + '||' +
+      (p.product||'').trim().toLowerCase() + '||' +
+      (p.shade||'').trim().toLowerCase()
+    ));
+    let rows = '';
+    const reversed = filteredWithIdx.slice().reverse();
+    reversed.forEach(({ o, idx }) => {
+    const isInDB = finalDBKeySet.has(
+      (o.client||'').trim().toLowerCase() + '||' +
+      (o.product||'').trim().toLowerCase() + '||' +
+      (o.shade||'').trim().toLowerCase()
     );
     const dbBadge = isInDB
       ? `<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 7px;border-radius:5px;background:var(--green-light);color:var(--green-accent);font-weight:600;">✓ In DB</span>`
@@ -5695,20 +6170,32 @@ function renderOrderTable() {
         <td>${isFirst ? actions : ''}</td>
       </tr>`;
     });
+    });
+
+    const table = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr><th>Date</th><th>Client</th><th>Product</th><th>Shade</th><th>Pack</th><th>Qty</th><th>Rate</th><th>Total</th><th>Region</th><th>Freight</th><th>DB Status</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    if (container) container.innerHTML = table;
+  }
+
+  // Recent 3 (primary product of each order) — always shows the latest
+  // orders overall, independent of the Order Register page's own filters.
+  if (recent) {
+    const recentRows = sessionOrders.slice().reverse().slice(0,3).map(o => `
+      <tr>
+        <td>${o.client}</td>
+        <td style="font-size:12px;max-width:120px;">${o.product}</td>
+        <td>${o.pack}</td>
+        <td style="text-align:right;font-weight:600;color:var(--saffron);">₹${o.totalAmount.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
+      </tr>`).join('');
+    recent.innerHTML = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr><th>Client</th><th>Product</th><th>Pack</th><th>Total</th></tr></thead><tbody>${recentRows}</tbody></table></div>`;
+  }
+}
+
+function clearOrderFilters() {
+  ['or-search','or-filter-sp','or-filter-daterange','or-filter-region'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
   });
-
-  const table = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr><th>Date</th><th>Client</th><th>Product</th><th>Shade</th><th>Pack</th><th>Qty</th><th>Rate</th><th>Total</th><th>Region</th><th>Freight</th><th>DB Status</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-  container.innerHTML = table;
-
-  // Recent 3 (primary product of each order)
-  const recentRows = sessionOrders.slice().reverse().slice(0,3).map(o => `
-    <tr>
-      <td>${o.client}</td>
-      <td style="font-size:12px;max-width:120px;">${o.product}</td>
-      <td>${o.pack}</td>
-      <td style="text-align:right;font-weight:600;color:var(--saffron);">₹${o.totalAmount.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
-    </tr>`).join('');
-  recent.innerHTML = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr><th>Client</th><th>Product</th><th>Pack</th><th>Total</th></tr></thead><tbody>${recentRows}</tbody></table></div>`;
+  renderOrderTable();
 }
 
 // ============================================================
@@ -6152,43 +6639,69 @@ function productCard(id, name, number, tableHTML, section, structureType) {
 }
 
 function renderAllPriceTables() {
+  // The standalone DPL/Bihar/Fixed grid markup this function originally
+  // targeted (#master-price-tables, #bj-price-tables, #fixed-price-tables)
+  // was replaced long ago by the "PI LIST SYSTEM" UI (#pls-price-list-
+  // container, driven by plsRenderAll()), but this function is still
+  // called from many places throughout the app after price data changes
+  // (imports, edits, Sheets sync, etc.) — and since those legacy elements
+  // don't exist, every single call used to throw immediately, silently
+  // killing whatever code ran after it in the same function (e.g. a price
+  // import would crash here and never reach updateStats()/renderClientList()
+  // right after it). This is also why the Price List page could render
+  // completely blank: showPage() called this before the real renderer.
+  // Delegate to the live renderer so every one of those call sites
+  // actually refreshes the visible price list, and guard each legacy
+  // element lookup so this can never throw again even if that old markup
+  // is ever reintroduced in a half-finished state.
+  if (typeof plsRenderAll === 'function') plsRenderAll();
+
   // MASTER
-  let masterHTML = '';
-  productsDB.filter(p => p.type === 'dpl').forEach(p => {
-    const sec = priceDB.master[p.id];
-    if (!sec) return;
-    let tableHTML = '', structType = 'simple';
-    if (sec.groups) { tableHTML = renderGroupTable(p.id, sec.groups, p.category === 'putty' ? PACK_COLS_PUTTY : PACK_COLS_LIQUID, 'master'); structType = 'groups'; }
-    else if (sec.simple) tableHTML = renderSimpleTable(p.id, sec.simple, p.category === 'putty' ? PACK_COLS_PUTTY : PACK_COLS_LIQUID, 'master');
-    else if (sec.named) { tableHTML = renderNamedTable(p.id, sec.named, 'master'); structType = 'named'; }
-    masterHTML += productCard(p.id, p.name, p.id, tableHTML, 'master', structType);
-  });
-  document.getElementById('master-price-tables').innerHTML = masterHTML || '<div style="color:var(--ink-muted);padding:20px;">No DPL products found.</div>';
+  const masterEl = document.getElementById('master-price-tables');
+  if (masterEl) {
+    let masterHTML = '';
+    productsDB.filter(p => p.type === 'dpl').forEach(p => {
+      const sec = priceDB.master[p.id];
+      if (!sec) return;
+      let tableHTML = '', structType = 'simple';
+      if (sec.groups) { tableHTML = renderGroupTable(p.id, sec.groups, p.category === 'putty' ? PACK_COLS_PUTTY : PACK_COLS_LIQUID, 'master'); structType = 'groups'; }
+      else if (sec.simple) tableHTML = renderSimpleTable(p.id, sec.simple, p.category === 'putty' ? PACK_COLS_PUTTY : PACK_COLS_LIQUID, 'master');
+      else if (sec.named) { tableHTML = renderNamedTable(p.id, sec.named, 'master'); structType = 'named'; }
+      masterHTML += productCard(p.id, p.name, p.id, tableHTML, 'master', structType);
+    });
+    masterEl.innerHTML = masterHTML || '<div style="color:var(--ink-muted);padding:20px;">No DPL products found.</div>';
+  }
 
   // BIHAR/JH
-  let bjHTML = '';
-  Object.keys(priceDB.bj).forEach(key => {
-    const sec = priceDB.bj[key];
-    const prod = productsDB.find(p => p.id === parseInt(key));
-    const name = prod ? prod.name : `Product ${key}`;
-    const id = prod?.id || key;
-    let tableHTML = '', structType = 'simple';
-    if (sec.groups) { tableHTML = renderGroupTable(key, sec.groups, PACK_COLS_BIG, 'bj'); structType = 'groups'; }
-    else if (sec.simple) tableHTML = renderSimpleTable(key, sec.simple, PACK_COLS_PUTTY, 'bj');
-    bjHTML += productCard(id, name + ' (Bihar/JH)', id, tableHTML, 'bj', structType);
-  });
-  document.getElementById('bj-price-tables').innerHTML = bjHTML || '<div style="color:var(--ink-muted);padding:20px;">No Bihar/JH overrides defined.</div>';
+  const bjEl = document.getElementById('bj-price-tables');
+  if (bjEl) {
+    let bjHTML = '';
+    Object.keys(priceDB.bj).forEach(key => {
+      const sec = priceDB.bj[key];
+      const prod = productsDB.find(p => p.id === parseInt(key));
+      const name = prod ? prod.name : `Product ${key}`;
+      const id = prod?.id || key;
+      let tableHTML = '', structType = 'simple';
+      if (sec.groups) { tableHTML = renderGroupTable(key, sec.groups, PACK_COLS_BIG, 'bj'); structType = 'groups'; }
+      else if (sec.simple) tableHTML = renderSimpleTable(key, sec.simple, PACK_COLS_PUTTY, 'bj');
+      bjHTML += productCard(id, name + ' (Bihar/JH)', id, tableHTML, 'bj', structType);
+    });
+    bjEl.innerHTML = bjHTML || '<div style="color:var(--ink-muted);padding:20px;">No Bihar/JH overrides defined.</div>';
+  }
 
   // FIXED
-  let fixedHTML = '';
-  productsDB.filter(p => p.type === 'fixed').forEach(p => {
-    const sec = priceDB.fixed[p.id];
-    if (!sec) return;
-    let tableHTML = '', structType = 'simple';
-    if (sec.named) { tableHTML = renderNamedTable(p.id, sec.named, 'fixed'); structType = 'named'; }
-    fixedHTML += productCard(p.id, p.name, p.id, tableHTML, 'fixed', structType);
-  });
-  document.getElementById('fixed-price-tables').innerHTML = fixedHTML || '<div style="color:var(--ink-muted);padding:20px;">No fixed price products found.</div>';
+  const fixedEl = document.getElementById('fixed-price-tables');
+  if (fixedEl) {
+    let fixedHTML = '';
+    productsDB.filter(p => p.type === 'fixed').forEach(p => {
+      const sec = priceDB.fixed[p.id];
+      if (!sec) return;
+      let tableHTML = '', structType = 'simple';
+      if (sec.named) { tableHTML = renderNamedTable(p.id, sec.named, 'fixed'); structType = 'named'; }
+      fixedHTML += productCard(p.id, p.name, p.id, tableHTML, 'fixed', structType);
+    });
+    fixedEl.innerHTML = fixedHTML || '<div style="color:var(--ink-muted);padding:20px;">No fixed price products found.</div>';
+  }
 }
 
 function switchPriceTab(tab, btn) {
@@ -8142,15 +8655,16 @@ async function _sheetsPostReadable(action, payload) {
 }
 
 function quickLogin(username, password) {
+  // SECURITY FIX: this used to auto-submit the login (no password typed, no
+  // Sign In click needed) whenever a card was wired with a hardcoded
+  // password — which is exactly what the Admin card did. That's a full
+  // login bypass: anyone who opens the page can click "Admin" and be in as
+  // Administrator with zero credentials. Now this ONLY pre-fills the
+  // username field. The password must always be typed and Sign In always
+  // has to be clicked, regardless of which card was used.
   document.getElementById('login-username').value = username;
-  if (password) {
-    document.getElementById('login-password').value = password;
-    setTimeout(doLogin, 150);
-  } else {
-    // No password pre-fill — focus password field so user types their own
-    document.getElementById('login-password').value = '';
-    setTimeout(function(){ document.getElementById('login-password').focus(); }, 100);
-  }
+  document.getElementById('login-password').value = '';
+  setTimeout(function(){ document.getElementById('login-password').focus(); }, 100);
 }
 
 function showLoginPanel() {
@@ -8228,17 +8742,12 @@ async function doLogin() {
   btn.disabled = true; btn.textContent = 'Signing in…';
   document.getElementById('login-error-msg').classList.remove('show');
 
-  // Always try local users first (works offline and when API not configured)
-  const localUsers = _getLocalUsers();
-  const localMatch = localUsers.find(u => u.username === username && u.password === password && u.isActive !== false);
-  if (localMatch) {
-    const { password: _pw, ...safeUser } = localMatch;
-    _loginSuccess(safeUser);
-    btn.disabled = false; btn.textContent = 'Sign In';
-    return;
-  }
-
-  // If API is configured, also try remote login
+  // FIX: When the Sheets API is configured, the server is the source of truth.
+  // Previously this checked hardcoded local defaults (admin/admin123, richa/richa123)
+  // FIRST, which meant those default passwords kept working forever on any new
+  // browser/device/incognito session even after an admin changed/reset them on the
+  // server — a permanent login backdoor. Now we only fall back to the local store
+  // when the API truly isn't configured (offline mode).
   if (SHEETS_API_URL && !SHEETS_API_URL.includes('YOUR_GOOGLE_APPS_SCRIPT')) {
     try {
       const res = await _sheetsPostReadable('login', { username, password });
@@ -8247,7 +8756,17 @@ async function doLogin() {
         btn.disabled = false; btn.textContent = 'Sign In';
         return;
       }
-    } catch(err) { /* fall through to error */ }
+    } catch(err) { /* network/API error — fall through to local check below */ }
+  }
+
+  // Local fallback (offline mode, or API call failed/unreachable)
+  const localUsers = _getLocalUsers();
+  const localMatch = localUsers.find(u => u.username === username && u.password === password && u.isActive !== false);
+  if (localMatch) {
+    const { password: _pw, ...safeUser } = localMatch;
+    _loginSuccess(safeUser);
+    btn.disabled = false; btn.textContent = 'Sign In';
+    return;
   }
 
   _setLoginError('Incorrect username or password.');
@@ -8295,14 +8814,18 @@ function _loginSuccess(user) {
   }, 300);
 
   // Auto-load all data from Google Sheets after login
-  // Delay 2s to let the UI settle before starting the fetch
+  // Delay 2s to let the UI settle before starting the fetch — but show the
+  // loading overlay right away so the user can't switch modules and see
+  // stale/incomplete data during that gap or while the fetch itself runs.
   if (_sheetsConnected) {
+    showGlobalLoader('Preparing your data…', 'Connecting to Google Sheets — please wait a moment');
     setTimeout(async () => {
       try {
         await loadPersistedData(); // ensure local data is ready
-        await loadAllFromSheets();
+        await loadAllFromSheets(); // hides the overlay itself when done (success or failure)
       } catch(e) {
         console.warn('Auto-load from Sheets failed:', e);
+        hideGlobalLoader();
       }
     }, 2000);
   }
@@ -8639,9 +9162,18 @@ function submitResetPassword(username) {
   users[idx].password = newPw;
   _saveLocalUsers(users);
 
-  // Also sync to Sheets if connected (admin reset — no old password needed)
+  // FIX: the backend now requires the caller's own admin credentials to
+  // authorize this action server-side (it no longer trusts the client).
+  // Prompt for the current admin's password to confirm this admin is who
+  // they say they are before sending the request.
   if (typeof _sheetsPost === 'function' && _sheetsConnected) {
-    _sheetsPost('adminResetPassword', { username, newPassword: newPw }).catch(function(){});
+    const adminPw = window.prompt('Confirm your own admin password to authorize this reset:');
+    if (!adminPw) { errEl.textContent='Admin password confirmation required.'; errEl.style.display='block'; return; }
+    _sheetsPost('adminResetPassword', { adminUsername: _currentUser.username, adminPassword: adminPw, username, newPassword: newPw })
+      .then(function(res){
+        if (!res || !res.success) showToast(res && res.error || 'Server-side reset failed', 'error');
+      })
+      .catch(function(){});
   }
 
   document.getElementById('reset-pw-modal').remove();
@@ -8753,8 +9285,19 @@ function deleteUserFromPage(username) {
   renderUserMgmtTableFull();
   showToast('User "' + username + '" deleted.', 'info');
   // Sync delete to Sheets if connected
+  // FIX: backend now requires verified admin credentials before deleting any
+  // account server-side; prompt for confirmation password.
   if (typeof _sheetsPost === 'function' && _sheetsConnected) {
-    _sheetsPost('deleteUser', { username }).catch(function(){});
+    const adminPw = window.prompt('Confirm your own admin password to authorize this delete:');
+    if (adminPw) {
+      _sheetsPost('deleteUser', { adminUsername: _currentUser.username, adminPassword: adminPw, username })
+        .then(function(res){
+          if (!res || !res.success) showToast(res && res.error || 'Server-side delete failed', 'error');
+        })
+        .catch(function(){});
+    } else {
+      showToast('Deleted locally only — server delete needs admin password confirmation', 'info');
+    }
   }
 }
 (function restoreSession() {
@@ -9291,6 +9834,18 @@ function renderFinalPITable() {
   updateFinalPIStats();
   const search = (document.getElementById('fpi-search')?.value || '').toLowerCase();
   const monthFilter = document.getElementById('fpi-filter-month')?.value || '';
+  const spFilter = document.getElementById('fpi-filter-sp')?.value || '';
+  const dateRangeFilter = document.getElementById('fpi-filter-daterange')?.value || '';
+
+  // Populate the Salesperson filter dropdown from whatever salespersons
+  // actually appear in the Final PI records (keeps current selection).
+  const spSel = document.getElementById('fpi-filter-sp');
+  if (spSel) {
+    const sps = [...new Set(piFinalDB.map(r => (r.salesperson||'').trim()).filter(Boolean))].sort();
+    const curSP = spSel.value;
+    spSel.innerHTML = '<option value="">All Salespersons</option>' +
+      sps.map(s => `<option value="${s}" ${s===curSP?'selected':''}>${s}</option>`).join('');
+  }
 
   // ── Date helpers ─────────────────────────────────────────────────────────
   // Parse any date string → JS Date (handles dd-mm-yyyy, yyyy-mm-dd, ISO)
@@ -9330,7 +9885,9 @@ function renderFinalPITable() {
       (r.product||'').toLowerCase().includes(search) || (r.shade||'').toLowerCase().includes(search) ||
       (r.piNumber||'').toLowerCase().includes(search);
     const matchMonth = !monthFilter || (_parseAnyDate(r.date) && _parseAnyDate(r.date).getMonth()+1 === parseInt(monthFilter));
-    return matchSearch && matchMonth;
+    const matchSP = !spFilter || (r.salesperson||'').trim() === spFilter;
+    const matchDateRange = _matchesQuickDateRange(_parseAnyDate(r.date), dateRangeFilter);
+    return matchSearch && matchMonth && matchSP && matchDateRange;
   });
 
   const container = document.getElementById('final-pi-table-container');
@@ -9393,17 +9950,37 @@ function updateFinalPIStats() {
 }
 
 function clearFPIFilters() {
-  ['fpi-search','fpi-filter-month'].forEach(id => {
+  ['fpi-search','fpi-filter-month','fpi-filter-sp','fpi-filter-daterange'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
   renderFinalPITable();
 }
 
+// Re-applies the same search/salesperson/date filters currently set on the
+// Final PI Database page — used so "Export CSV" matches what's on screen.
+function _getFilteredFinalPIRecords() {
+  const search = (document.getElementById('fpi-search')?.value || '').toLowerCase();
+  const monthFilter = document.getElementById('fpi-filter-month')?.value || '';
+  const spFilter = document.getElementById('fpi-filter-sp')?.value || '';
+  const dateRangeFilter = document.getElementById('fpi-filter-daterange')?.value || '';
+  return piFinalDB.filter(r => {
+    const matchSearch = !search || (r.customerName||'').toLowerCase().includes(search) ||
+      (r.product||'').toLowerCase().includes(search) || (r.shade||'').toLowerCase().includes(search) ||
+      (r.piNumber||'').toLowerCase().includes(search);
+    const matchMonth = !monthFilter || (_parseFlexDate(r.date) && _parseFlexDate(r.date).getMonth()+1 === parseInt(monthFilter));
+    const matchSP = !spFilter || (r.salesperson||'').trim() === spFilter;
+    const matchDateRange = _matchesQuickDateRange(_parseFlexDate(r.date), dateRangeFilter);
+    return matchSearch && matchMonth && matchSP && matchDateRange;
+  });
+}
+
 function exportFinalPI() {
   if (!piFinalDB.length) { showToast('No Final PI records to export','error'); return; }
+  const records = _getFilteredFinalPIRecords();
+  if (!records.length) { showToast('No records match the current filters','error'); return; }
   const headers = ['PI Number','Date','Customer','Address','Product','Shade','Pack Size','Pcs','Ltr','Salesperson','Freight Type','Freight Amt','Price','Total Value'];
-  const rows = piFinalDB.map(r => [
+  const rows = records.map(r => [
     r.piNumber, r.date, r.customerName, r.address||'', r.product, r.shade||'', r.packSize||'',
     r.pcs||r.quantity||0, r.ltr||0,
     r.salesperson||'', r.freightType||'To Pay', r.freight||0, r.price, r.totalValue
@@ -11518,8 +12095,12 @@ function previewBulkPI(event) {
       (rows.length>8?`<tr><td colspan="${headers.length}" style="text-align:center;color:var(--ink-muted);font-size:11px;">…and ${rows.length-8} more rows</td></tr>`:'') + '</tbody>';
     tbl.innerHTML = head + body;
     const missing = rows.filter(r => !r.date || !r.customer || !r.product);
-    document.getElementById('bulk-pi-errors').textContent = missing.length
-      ? `⚠️ ${missing.length} rows missing required fields (date, customer, product) — they will be skipped` : '';
+    const missingShade = rows.filter(r => r.date && r.customer && r.product && !(r.shade||'').trim());
+    let errMsg = missing.length ? `⚠️ ${missing.length} rows missing required fields (date, customer, product) — they will be skipped` : '';
+    if (missingShade.length) {
+      errMsg += (errMsg ? ' · ' : '⚠️ ') + `${missingShade.length} row(s) have no Shade — they'll be imported but will show as "—" in the PI database`;
+    }
+    document.getElementById('bulk-pi-errors').textContent = errMsg;
     document.getElementById('bulk-pi-import-btn').disabled = false;
   });
 }
@@ -12435,6 +13016,14 @@ function initSPReportFilters() {
     spSel.innerHTML = '<option value="">All Salespersons</option>';
     sps.forEach(s => { spSel.innerHTML += `<option value="${s}" ${s===cur?'selected':''}>${s}</option>`; });
   }
+  // Customer dropdown
+  const custSel = document.getElementById('spr-filter-customer');
+  if (custSel) {
+    const custs = [...new Set(piFinalDB.map(r => (r.customerName||'').trim()).filter(Boolean))].sort();
+    const cur = custSel.value;
+    custSel.innerHTML = '<option value="">All Customers</option>';
+    custs.forEach(c => { custSel.innerHTML += `<option value="${c}" ${c===cur?'selected':''}>${c}</option>`; });
+  }
   // Product dropdown
   const prodSel = document.getElementById('spr-filter-product');
   if (prodSel) {
@@ -12467,22 +13056,33 @@ function parseSPRDate(d) {
   return isNaN(dt) ? null : dt;
 }
 
+// Week-of-month bucket (1-5) for a given Date, matching the filter dropdown:
+// Week 1 = days 1-7, Week 2 = 8-14, Week 3 = 15-21, Week 4 = 22-28, Week 5 = 29-31
+function _weekOfMonth(dt) {
+  if (!dt) return null;
+  return Math.min(5, Math.ceil(dt.getDate() / 7));
+}
+
 function renderSPReport() {
   initSPReportFilters();
 
   const filterSP = document.getElementById('spr-filter-sp')?.value || '';
+  const filterCustomer = document.getElementById('spr-filter-customer')?.value || '';
   const filterProduct = document.getElementById('spr-filter-product')?.value || '';
   const filterMonth = document.getElementById('spr-filter-month')?.value || '';
+  const filterWeek = document.getElementById('spr-filter-week')?.value || '';
   const filterYear = document.getElementById('spr-filter-year')?.value || '';
 
   let data = piFinalDB.filter(r => {
     if (filterSP && (r.salesperson||'') !== filterSP) return false;
+    if (filterCustomer && (r.customerName||'').trim() !== filterCustomer) return false;
     if (filterProduct && (r.product||'') !== filterProduct) return false;
-    if (filterMonth || filterYear) {
+    if (filterMonth || filterYear || filterWeek) {
       const dt = parseSPRDate(r.date || r.createdAt);
       if (!dt) return false;
       if (filterMonth && (dt.getMonth()+1) !== parseInt(filterMonth)) return false;
       if (filterYear && String(dt.getFullYear()) !== filterYear) return false;
+      if (filterWeek && _weekOfMonth(dt) !== parseInt(filterWeek)) return false;
     }
     return true;
   });
@@ -12538,15 +13138,17 @@ function renderSPReport() {
     const spTotalRev = records.reduce((s,r)=>s+(parseFloat(r.totalValue)||0),0);
     const spPIs = records.length;
 
-    // Aggregate by product + shade + packSize for this SP
+    // Aggregate by customer + product + shade + packSize for this SP
     const agg = {};
     records.forEach(r => {
+      const cust = (r.customerName||'—').trim() || '—';
       const prod = (r.product||'—').trim();
       const shade = (r.shade||'—').trim() || '—';
       const pack = (r.packSize || r.pack_size || r.unit || '—').trim() || '—';
-      const key = `${prod}||${shade}||${pack}`;
+      const key = `${cust}||${prod}||${shade}||${pack}`;
       if (!agg[key]) {
         agg[key] = {
+          customer: cust,
           product: prod,
           shade: shade,
           packSize: pack,
@@ -12584,7 +13186,7 @@ function renderSPReport() {
       agg[key].piCount += 1;
     });
 
-    const aggRows = Object.values(agg).sort((a,b) => b.totalLtr - a.totalLtr);
+    const aggRows = Object.values(agg).sort((a,b) => a.customer.localeCompare(b.customer) || b.totalLtr - a.totalLtr);
     const maxLtr = aggRows.length ? aggRows[0].totalLtr : 1;
 
     // SP color (cycle through palette)
@@ -12622,6 +13224,7 @@ function renderSPReport() {
           <thead>
             <tr>
               <th>#</th>
+              <th>Customer</th>
               <th>Product</th>
               <th>Shade / Colour</th>
               <th>Pack Size</th>
@@ -12638,6 +13241,7 @@ function renderSPReport() {
             const catColor = catColors[row.category] || 'var(--ink-muted)';
             return `<tr>
               <td style="color:var(--ink-muted);font-size:12px;">${i+1}</td>
+              <td style="font-weight:600;max-width:160px;">${row.customer}</td>
               <td style="font-weight:600;max-width:180px;">${row.product}</td>
               <td>
                 <div style="display:flex;align-items:center;gap:6px;">
@@ -12664,7 +13268,7 @@ function renderSPReport() {
           <!-- Subtotal row -->
           <tfoot>
             <tr style="background:var(--stone-light);font-weight:700;border-top:2px solid var(--stone);">
-              <td colspan="5" style="padding:10px 14px;font-size:12px;color:var(--ink-muted);text-align:right;">SUBTOTAL — ${sp}</td>
+              <td colspan="6" style="padding:10px 14px;font-size:12px;color:var(--ink-muted);text-align:right;">SUBTOTAL — ${sp}</td>
               <td style="text-align:right;color:${spColor};font-size:15px;padding:10px 14px;">${aggRows.reduce((s,r)=>s+r.qty,0).toLocaleString('en-IN',{maximumFractionDigits:1})}</td>
               <td style="text-align:right;color:var(--green-accent);font-size:15px;padding:10px 14px;">${aggRows.reduce((s,r)=>s+r.totalLtr,0).toLocaleString('en-IN',{maximumFractionDigits:1})}</td>
               <td style="text-align:right;font-size:14px;padding:10px 14px;">₹${spTotalRev.toLocaleString('en-IN',{maximumFractionDigits:0})}</td>
@@ -12702,7 +13306,7 @@ function renderSPReport() {
 }
 
 function clearSPReportFilters() {
-  ['spr-filter-sp','spr-filter-product','spr-filter-month','spr-filter-year'].forEach(id => {
+  ['spr-filter-sp','spr-filter-customer','spr-filter-product','spr-filter-month','spr-filter-week','spr-filter-year'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
@@ -12712,18 +13316,22 @@ function clearSPReportFilters() {
 function exportSPReport() {
   if (!piFinalDB.length) { showToast('No data to export', 'error'); return; }
   const filterSP = document.getElementById('spr-filter-sp')?.value || '';
+  const filterCustomer = document.getElementById('spr-filter-customer')?.value || '';
   const filterProduct = document.getElementById('spr-filter-product')?.value || '';
   const filterMonth = document.getElementById('spr-filter-month')?.value || '';
+  const filterWeek = document.getElementById('spr-filter-week')?.value || '';
   const filterYear = document.getElementById('spr-filter-year')?.value || '';
 
   let data = piFinalDB.filter(r => {
     if (filterSP && (r.salesperson||'') !== filterSP) return false;
+    if (filterCustomer && (r.customerName||'').trim() !== filterCustomer) return false;
     if (filterProduct && (r.product||'') !== filterProduct) return false;
-    if (filterMonth || filterYear) {
+    if (filterMonth || filterYear || filterWeek) {
       const dt = parseSPRDate(r.date || r.createdAt);
       if (!dt) return false;
       if (filterMonth && (dt.getMonth()+1) !== parseInt(filterMonth)) return false;
       if (filterYear && String(dt.getFullYear()) !== filterYear) return false;
+      if (filterWeek && _weekOfMonth(dt) !== parseInt(filterWeek)) return false;
     }
     return true;
   });
@@ -12732,11 +13340,12 @@ function exportSPReport() {
   const agg = {};
   data.forEach(r => {
     const sp = (r.salesperson||'Unassigned').trim()||'Unassigned';
+    const cust = (r.customerName||'—').trim()||'—';
     const prod = (r.product||'—').trim();
     const shade = (r.shade||'—').trim()||'—';
     const pack = (r.packSize||r.pack_size||r.unit||'—').trim()||'—';
-    const key = `${sp}||${prod}||${shade}||${pack}`;
-    if (!agg[key]) agg[key] = {sp, prod, shade, pack, category: r.category||'', qty:0, totalLtr:0, rev:0, piCount:0};
+    const key = `${sp}||${cust}||${prod}||${shade}||${pack}`;
+    if (!agg[key]) agg[key] = {sp, cust, prod, shade, pack, category: r.category||'', qty:0, totalLtr:0, rev:0, piCount:0};
     // Qty/PCS = number of pieces/units ordered (r.pcs)
     const pcs = parseFloat(r.pcs) || parseFloat(r.qty) || 0;
     agg[key].qty += pcs;
@@ -12752,9 +13361,9 @@ function exportSPReport() {
     agg[key].piCount += 1;
   });
 
-  const rows = Object.values(agg).sort((a,b) => a.sp.localeCompare(b.sp) || b.totalLtr - a.totalLtr);
-  const headers = ['Salesperson','Product','Shade','Pack Size','Category','No. of PIs','Total Qty','Total Ltr/KG','Revenue (INR)'];
-  const csvRows = rows.map(r => [r.sp, r.prod, r.shade, r.pack, r.category, r.piCount, r.qty.toFixed(2), r.totalLtr.toFixed(2), r.rev.toFixed(0)]);
+  const rows = Object.values(agg).sort((a,b) => a.sp.localeCompare(b.sp) || a.cust.localeCompare(b.cust) || b.totalLtr - a.totalLtr);
+  const headers = ['Salesperson','Customer','Product','Shade','Pack Size','Category','No. of PIs','Total Qty','Total Ltr/KG','Revenue (INR)'];
+  const csvRows = rows.map(r => [r.sp, r.cust, r.prod, r.shade, r.pack, r.category, r.piCount, r.qty.toFixed(2), r.totalLtr.toFixed(2), r.rev.toFixed(0)]);
   downloadCSV([headers, ...csvRows], 'salesperson_sales_report.csv');
   showToast('CSV exported!', 'success');
 }
@@ -12764,18 +13373,22 @@ function exportSPReport() {
 function exportSPReportBySP() {
   if (!piFinalDB.length) { showToast('No data to export', 'error'); return; }
   const filterSP = document.getElementById('spr-filter-sp')?.value || '';
+  const filterCustomer = document.getElementById('spr-filter-customer')?.value || '';
   const filterProduct = document.getElementById('spr-filter-product')?.value || '';
   const filterMonth = document.getElementById('spr-filter-month')?.value || '';
+  const filterWeek = document.getElementById('spr-filter-week')?.value || '';
   const filterYear = document.getElementById('spr-filter-year')?.value || '';
 
   let data = piFinalDB.filter(r => {
     if (filterSP && (r.salesperson||'') !== filterSP) return false;
+    if (filterCustomer && (r.customerName||'').trim() !== filterCustomer) return false;
     if (filterProduct && (r.product||'') !== filterProduct) return false;
-    if (filterMonth || filterYear) {
+    if (filterMonth || filterYear || filterWeek) {
       const dt = parseSPRDate(r.date || r.createdAt);
       if (!dt) return false;
       if (filterMonth && (dt.getMonth()+1) !== parseInt(filterMonth)) return false;
       if (filterYear && String(dt.getFullYear()) !== filterYear) return false;
+      if (filterWeek && _weekOfMonth(dt) !== parseInt(filterWeek)) return false;
     }
     return true;
   });
@@ -12790,29 +13403,30 @@ function exportSPReportBySP() {
     bySP[sp].push(r);
   });
 
-  const headers = ['Salesperson','Product','Shade','Pack Size','Qty / Pcs','Total Ltr/KG','Revenue (INR)'];
+  const headers = ['Salesperson','Customer','Product','Shade','Pack Size','Qty / Pcs','Total Ltr/KG','Revenue (INR)'];
   const csvRows = [headers];
 
   Object.entries(bySP).sort().forEach(([sp, records]) => {
     const agg = {};
     records.forEach(r => {
+      const cust = (r.customerName||'—').trim()||'—';
       const prod = (r.product||'—').trim();
       const shade = (r.shade||'—').trim()||'—';
       const pack = (r.packSize||r.pack_size||r.unit||'—').trim()||'—';
-      const key = `${prod}||${shade}||${pack}`;
-      if (!agg[key]) agg[key] = { prod, shade, pack, qty:0, totalLtr:0, rev:0 };
+      const key = `${cust}||${prod}||${shade}||${pack}`;
+      if (!agg[key]) agg[key] = { cust, prod, shade, pack, qty:0, totalLtr:0, rev:0 };
       const qty = parseFloat(r.pcs||r.quantity) || 0;
       const ltr = parseFloat(r.ltr) || qty;
       agg[key].qty  += qty;
       agg[key].totalLtr += ltr;
       agg[key].rev  += parseFloat(r.totalValue)||0;
     });
-    const aggRows = Object.values(agg).sort((a,b) => b.qty - a.qty);
+    const aggRows = Object.values(agg).sort((a,b) => a.cust.localeCompare(b.cust) || b.qty - a.qty);
     aggRows.forEach(row => {
-      csvRows.push([sp, row.prod, row.shade, row.pack, row.qty.toFixed(2), row.totalLtr.toFixed(2), row.rev.toFixed(0)]);
+      csvRows.push([sp, row.cust, row.prod, row.shade, row.pack, row.qty.toFixed(2), row.totalLtr.toFixed(2), row.rev.toFixed(0)]);
     });
     // Subtotal
-    csvRows.push([`--- TOTAL: ${sp} ---`, '', '', '',
+    csvRows.push([`--- TOTAL: ${sp} ---`, '', '', '', '',
       aggRows.reduce((s,r)=>s+r.qty,0).toFixed(2),
       aggRows.reduce((s,r)=>s+r.totalLtr,0).toFixed(2),
       aggRows.reduce((s,r)=>s+r.rev,0).toFixed(0)]);
@@ -13549,27 +14163,24 @@ function syncShadesToSheet() {
     return;
   }
   showToast('Syncing shades to Google Sheet…', 'info');
-  fetch(GS_URL, {
-    method: 'POST',
-    mode: 'no-cors',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ action: 'saveShadesDB', data: arr })
-  }).then(function(){
-    showToast(arr.length + ' shades saved to Google Sheet ✓', 'success');
-  }).catch(function(e){
-    // Try via _sheetsPost if direct fetch fails
-    if (typeof _sheetsPost === 'function') {
-      _sheetsPost('saveShadesDB', { data: arr })
-        .then(function(res){
-          if (res && res.success) showToast(arr.length + ' shades synced to Google Sheet ✓', 'success');
-          else showToast('Shades saved locally (Sheets sync issue)', 'info');
-        })
-        .catch(function(){ showToast('Shades saved locally only', 'info'); });
-    } else {
-      showToast('Shades saved locally (network error: ' + e.message + ')', 'info');
-    }
-  });
+  // FIX: a 'no-cors' request returns an opaque response — .then() always fires
+  // even if the server-side save actually failed (auth error, script error, etc.),
+  // so this previously showed a false "success" toast every time. Use the
+  // existing readable POST helper (_sheetsPost) so failures are detected and
+  // reported honestly.
+  if (typeof _sheetsPost === 'function') {
+    _sheetsPost('saveShadesDB', { data: arr })
+      .then(function(res){
+        if (res && res.success) showToast(arr.length + ' shades synced to Google Sheet ✓', 'success');
+        else showToast('Shades saved locally (Sheets sync issue: ' + (res && res.error || 'unknown error') + ')', 'info');
+      })
+      .catch(function(e){ showToast('Shades saved locally (network error: ' + e.message + ')', 'info'); });
+  } else {
+    showToast('Shades saved locally only (sync helper unavailable)', 'info');
+  }
 }
+
+
 
 function exportShadesCSV() {
   _initShadesStore();
