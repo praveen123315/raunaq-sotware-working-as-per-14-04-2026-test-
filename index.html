@@ -816,11 +816,19 @@ function _matchesQuickDateRange(dateValue, range) {
                 </select>
                 <div id="pi-product-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid var(--saffron);border-top:none;border-radius:0 0 8px 8px;max-height:240px;overflow-y:auto;z-index:300;box-shadow:0 8px 20px rgba(0,0,0,0.12);"></div>
               </div>
-              <!-- Group selector — hidden when product has no groups -->
-              <div id="pi-group-wrap" style="display:none;">
+              <!-- Group — fixed classification list, always visible & mandatory -->
+              <div id="pi-group-wrap">
                 <label class="form-label">Group *</label>
                 <select id="pi-group" class="form-input" onchange="handleGroupChange()">
                   <option value="">— Select Group —</option>
+                  <option value="Group I">Group I</option>
+                  <option value="Group II">Group II</option>
+                  <option value="Group III">Group III</option>
+                  <option value="Group IV">Group IV</option>
+                  <option value="Group V">Group V</option>
+                  <option value="Group VI">Group VI</option>
+                  <option value="Group - Other Items">Group - Other Items</option>
+                  <option value="Group - Not Applicable">Group - Not Applicable</option>
                 </select>
               </div>
               <div style="position:relative;">
@@ -3259,7 +3267,7 @@ const GOOGLE_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxMUCm9C
 // GOOGLE SHEETS API — CONFIGURATION
 // ▶ After deploying your Apps Script Web App, paste the URL below
 // ============================================================
-const SHEETS_API_URL = 'https://script.google.com/macros/s/AKfycbxMUCm9CTxuqEk_kawszCYyqH7axaZFRg9kNy33QyIzpUmogxAnLpLCCf3ipYQo0jjGkQ/exec';
+const SHEETS_API_URL = 'https://script.google.com/macros/s/AKfycbw2pHdo--EbSkUmn1A71-Upg-Yt3wec3O-B3PdjBZQH8lar_BleaVjbR7jrqeIHIe4vsA/exec';
 // Example: 'https://script.google.com/macros/s/AKfycb.../exec'
 
 // ── Sheets sync status ─────────────────────────────────────
@@ -3356,14 +3364,36 @@ function _updateSyncBadge(state) {
 // Send a single order to Sheets
 async function _syncOrder(order) {
   _updateSyncBadge('syncing');
+  // FIX: this used to mint a brand-new 'ORD-'+Date.now() id on every call,
+  // even when re-saving an order that was being *edited*. The backend
+  // upserts by ID, so a fresh id every time meant every edit created a
+  // duplicate row instead of updating the original — and it's also why
+  // re-loading an order from Sheets and hitting "Edit PI" could never find
+  // its own saved record again. Use the order's own stable in-session id
+  // (set once at creation in saveOrder()) so repeat saves of the same
+  // order always upsert the same sheet row.
   const r = await _sheetsPost('saveOrder', { data: {
-    id: 'ORD-' + Date.now(),
+    id: 'ORD-' + order.id,
     date: (function(d){ if(!d)return fmtDateOnly(); const dmy=String(d).match(/^(\d{2}-\d{2}-\d{4})/); if(dmy)return dmy[1]; const dt=new Date(d); return isNaN(dt)?d:(String(dt.getDate()).padStart(2,'0')+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+dt.getFullYear()); })(order.date),
     client: order.client, region: order.region,
     salesPerson: order.sales, product: order.product, shade: order.shade,
     pack: order.pack, qty: order.qty, unit: 'L',
     finalRate: order.finalRate, totalAmount: order.totalAmount,
-    status: 'Saved'
+    status: 'Saved',
+    // ── New fields (backward compatible — Apps Script upgradeExistingSheet()
+    // adds these columns without touching existing rows) ──
+    group: order.group || order._formState?.group || 'Group - Not Applicable',
+    address: order.address || '',
+    comment: order.comment || '',
+    outstanding: order.outstanding || 0,
+    extraRows: order.extraRows || [],
+    formState: order._formState || {},
+    // Which product line(s) of this order have already been registered
+    // to the Final PI Database, tracked by direct piNumber reference
+    // (see registerOrderToFinalDB/confirmFinalizePI) rather than by
+    // matching text — so it can never be confused with a different
+    // order that happens to share the same client/product/shade.
+    registeredPI: order.registeredPI || null
   }});
   _updateSyncBadge(r ? 'ok' : 'error');
 }
@@ -3372,11 +3402,17 @@ async function _syncOrder(order) {
 async function _syncClient(client) {
   _updateSyncBadge('syncing');
   const r = await _sheetsPost('saveClient', { data: {
-    id: 'CLI-' + Date.now(),
+    id: 'CLI-' + (client.id || Date.now()),
     name: client.name, phone: client.phone, region: client.region,
     address: client.contact || '', city: client.city
   }});
   _updateSyncBadge(r ? 'ok' : 'error');
+}
+
+// Deletes a client from Google Sheets. Requires the backend's deleteClient
+// action (added alongside this fix — see Code.gs).
+async function _syncDeleteClient(clientId) {
+  await _sheetsPost('deleteClient', { clientId: 'CLI-' + clientId });
 }
 
 // Send a single RM to Sheets
@@ -3433,6 +3469,21 @@ async function _syncDeleteCosting(costingId) {
 // Sync packaging master
 async function _syncPackaging() {
   await _sheetsPost('savePackaging', { data: packagingMaster });
+}
+
+// Applies one edited packaging field (container/carton code or cost) from
+// the Packaging table's inline inputs. FIX: these edits previously only
+// mutated packagingMaster in memory — no localStorage persistence, no
+// Google Sheets sync — so a page refresh silently lost any container/
+// carton cost changes unless the user happened to click "Sync All"
+// first. Now every edit is persisted and synced immediately, same as
+// every other editable module in the app.
+function _updatePackagingField(key, field, value) {
+  if (!packagingMaster[key]) packagingMaster[key] = {};
+  packagingMaster[key][field] = value;
+  if (typeof persistData === 'function') persistData();
+  if (typeof _syncPackaging === 'function') _syncPackaging();
+  if ((field === 'containerCost' || field === 'cartonCost') && typeof recalcCosting === 'function') recalcCosting();
 }
 
 // Sync price DB
@@ -3726,20 +3777,89 @@ async function loadAllFromSheets() {
 async function _applyLoadedSheetsData(res) {
   // Clients — authoritative from Sheets
   if (Array.isArray(res.sessionClients)) {
-    sessionClients = res.sessionClients.map(r => ({
-      name: r.Name || r.name || '', contact: r.Address || r.contact || '', phone: r.Phone || r.phone || '',
-      region: r.Region || r.region || 'normal', city: r.City || r.city || ''
-    }));
+    sessionClients = res.sessionClients.map(r => {
+      const rawId = r.ID || r.id || '';
+      const idMatch = String(rawId).match(/(\d+)/);
+      return {
+        id: idMatch ? parseInt(idMatch[1]) : Date.now(),
+        name: r.Name || r.name || '', contact: r.Address || r.contact || '', phone: r.Phone || r.phone || '',
+        region: r.Region || r.region || 'normal', city: r.City || r.city || ''
+      };
+    });
   }
 
   // Orders — authoritative from Sheets
   if (Array.isArray(res.sessionOrders)) {
-    sessionOrders = res.sessionOrders.map(r => ({
-      date: r.Date || r.date, client: r.Client || r.client, sales: r.Sales_Person || r.sales, region: r.Region || r.region,
-      product: r.Product || r.product, shade: r.Shade || r.shade, pack: r.Pack || r.pack,
-      qty: parseFloat(r.Qty || r.qty)||0, finalRate: parseFloat(r.Final_Rate || r.finalRate)||0,
-      totalAmount: parseFloat(r.Total_Amount || r.totalAmount)||0
-    }));
+    sessionOrders = res.sessionOrders.map(r => {
+      const rawId = r.ID || r.id || '';
+      const idMatch = String(rawId).match(/(\d+)/);
+      const id = idMatch ? parseInt(idMatch[1]) : Date.now();
+      const date = r.Date || r.date;
+      const client = r.Client || r.client;
+      const sales = r.Sales_Person || r.sales;
+      const region = r.Region || r.region;
+      const product = r.Product || r.product;
+      const shade = r.Shade || r.shade;
+      const pack = r.Pack || r.pack;
+      const qty = parseFloat(r.Qty || r.qty)||0;
+      const finalRate = parseFloat(r.Final_Rate || r.finalRate)||0;
+      const totalAmount = parseFloat(r.Total_Amount || r.totalAmount)||0;
+      const group = r.Group || r.group || '';
+      const address = r.Address || r.address || '';
+      const comment = r.Comment || r.comment || '';
+      const outstanding = parseFloat(r.Outstanding || r.outstanding) || 0;
+
+      // Extra_Rows_JSON / Form_State_JSON only exist on orders saved after
+      // the schema upgrade (see Code.gs upgradeExistingSheet()). Parse them
+      // defensively — malformed/absent JSON must never break the app.
+      let extraRows = [];
+      try {
+        const raw = r.Extra_Rows_JSON || r.extraRows;
+        if (raw) extraRows = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      } catch (e) { extraRows = []; }
+      if (!Array.isArray(extraRows)) extraRows = [];
+
+      let formState = null;
+      try {
+        const raw = r.Form_State_JSON || r.formState;
+        if (raw) formState = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      } catch (e) { formState = null; }
+      if (formState && !Object.keys(formState).length) formState = null;
+
+      // Registered_PI_JSON: which product slot(s) on this order are
+      // already registered to the Final PI Database, by piNumber
+      // reference (see registerOrderToFinalDB/confirmFinalizePI). Older
+      // orders won't have this column yet — leave it null so the Orders
+      // table falls back to a best-effort legacy match for them only.
+      let registeredPI = null;
+      try {
+        const raw = r.Registered_PI_JSON || r.registeredPI;
+        if (raw) registeredPI = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      } catch (e) { registeredPI = null; }
+      if (registeredPI && !registeredPI.primary && !(registeredPI.extras && registeredPI.extras.some(Boolean))) registeredPI = null;
+
+      // EDIT-PI FIX: older orders (saved before this field existed) won't
+      // have a Form_State_JSON blob. Rather than leave _formState undefined
+      // — which used to make editOrderPI() refuse to open the order at all
+      // — synthesize a best-effort state from the plain columns that DO
+      // exist. It won't carry discount breakdowns, but product/shade/pack/
+      // qty/group/client all restore correctly.
+      if (!formState) {
+        const matchedProd = (typeof productsDB !== 'undefined' ? productsDB : []).find(p => p.name === product);
+        formState = {
+          client, sales, region,
+          productId: matchedProd ? matchedProd.id : '',
+          shade, packVal: '', qty,
+          dpl: finalRate, discPerLitre: 0, discTrade: 0, discLoyalty: 0, discCash: 0,
+          freightType: 'To Pay', freight: 0, address, comment, outstanding,
+          date, group,
+          _synthesized: true
+        };
+      }
+
+      return { id, date, client, sales, region, product, shade, pack, qty, finalRate, totalAmount,
+        group, address, comment, outstanding, extraRows, _formState: formState, registeredPI };
+    });
   }
 
   // ── RM Master ─────────────────────────────────────────────
@@ -3851,7 +3971,12 @@ async function _applyLoadedSheetsData(res) {
       price: parseFloat(r.price)||0, totalValue: parseFloat(r.totalValue)||0,
       freight: parseFloat(r.freight)||0, freightType: r.freightType || 'To Pay',
       source: r.source,
-      createdAt: r.createdAt, comments: r.comments || ''
+      createdAt: r.createdAt, comments: r.comments || '',
+      // FIX: group was saved to the Final_PI sheet (see saveFinalPI in
+      // Code.gs) but never read back here, so it silently vanished from
+      // every Final PI record as soon as the page reloaded / re-synced
+      // from Sheets. Product/Shade/Group stay three separate fields.
+      group: r.group || r.Group || 'Group - Not Applicable'
     }));
   }
 
@@ -4614,19 +4739,17 @@ function _getPIAvailablePacks() {
   if (sec.simple) {
     scanPrices(sec.simple);
   } else if (sec.groups) {
-    if (selectedGroup) {
-      const grp = sec.groups.find(g => g.label === selectedGroup);
-      if (grp) scanPrices(grp.prices);
-    } else {
-      sec.groups.forEach(g => scanPrices(g.prices));
-    }
+    // NOTE: `selectedGroup` is now the fixed classification value (Group
+    // I–VI / Other Items / Not Applicable), not a price-list group label,
+    // so it will not match here — always falls through to scanning every
+    // group's packs, same as if no group were selected.
+    const grp = selectedGroup ? sec.groups.find(g => g.label === selectedGroup) : null;
+    if (grp) scanPrices(grp.prices);
+    else sec.groups.forEach(g => scanPrices(g.prices));
   } else if (sec.named) {
-    if (selectedGroup) {
-      const row = sec.named.find(n => n.name === selectedGroup);
-      if (row) scanPrices(row.prices);
-    } else {
-      sec.named.forEach(n => scanPrices(n.prices));
-    }
+    const row = selectedGroup ? sec.named.find(n => n.name === selectedGroup) : null;
+    if (row) scanPrices(row.prices);
+    else sec.named.forEach(n => scanPrices(n.prices));
   }
 
   return packs.size > 0 ? [...packs] : null;
@@ -4930,10 +5053,16 @@ function generatePI() {
       return;
     }
   }
-  const groupWrap = document.getElementById('pi-group-wrap');
-  if (groupWrap && groupWrap.style.display !== 'none') {
+  {
     const groupVal = document.getElementById('pi-group')?.value || '';
-    if (!groupVal) { showToast('Please select a Group.', 'error'); return; }
+    if (!groupVal) { showToast('Group is required for Product 1. Please select a Group.', 'error'); return; }
+  }
+  {
+    const _missingGroupRows = _extraRowsMissingGroup();
+    if (_missingGroupRows.length) {
+      showToast('Group is required for Product ' + (parseInt(_missingGroupRows[0]) + 1) + '. Please select a Group before generating the PI.', 'error');
+      return;
+    }
   }
   if (finalRateText === '₹ —') {
     showToast('Please calculate price first.', 'error'); return;
@@ -4941,6 +5070,10 @@ function generatePI() {
 
   // Get outstanding amount from PI form (required field)
   const outstandingAmount = parseFloat(document.getElementById('pi-outstanding')?.value) || 0;
+
+  // Group — fixed, mandatory dropdown (Group I–VI / Other Items / Not
+  // Applicable). Validated above, so this is guaranteed non-empty here.
+  const _piGroupVal = (document.getElementById('pi-group')?.value || '').trim();
 
   // Collect extra product rows
   const extraRows = _collectExtraRows();
@@ -4961,7 +5094,7 @@ function generatePI() {
   const primaryRowHTML = `
     <tr style="border-bottom:1px solid var(--stone-light);">
       <td style="padding:14px 12px;font-size:13px;">1</td>
-      <td style="padding:14px 12px;font-size:13.5px;font-weight:500;">${productText}</td>
+      <td style="padding:14px 12px;font-size:13.5px;font-weight:500;">${productText}${_piGroupVal ? ` <span style="font-size:10px;font-weight:600;color:var(--ink-muted);">[${_piGroupVal}]</span>` : ''}</td>
       <td style="padding:14px 12px;font-size:13px;">${shade || '—'}</td>
       <td style="padding:14px 12px;font-size:13px;text-align:center;">${packText}</td>
       <td style="padding:14px 12px;font-size:13px;text-align:center;">${qty}</td>
@@ -4972,7 +5105,7 @@ function generatePI() {
   const extraRowsHTML = extraRows.map((r, i) => `
     <tr style="border-bottom:1px solid var(--stone-light);">
       <td style="padding:14px 12px;font-size:13px;">${i + 2}</td>
-      <td style="padding:14px 12px;font-size:13.5px;font-weight:500;">${r.productText}</td>
+      <td style="padding:14px 12px;font-size:13.5px;font-weight:500;">${r.productText}${r.group ? ` <span style="font-size:10px;font-weight:600;color:var(--ink-muted);">[${r.group}]</span>` : ''}</td>
       <td style="padding:14px 12px;font-size:13px;">${r.shade || '—'}</td>
       <td style="padding:14px 12px;font-size:13px;text-align:center;">${r.packText}</td>
       <td style="padding:14px 12px;font-size:13px;text-align:center;">${r.qty}</td>
@@ -5580,11 +5713,13 @@ function _sfCartonCell(pcs, packVal) {
   return _fmtPlainNum(n) + ' Nug';
 }
 
-// Rebuilds the current PI (primary product + any extra rows) as the
-// Cartoon / Item / Qty. / Total Ltr. / Rate / Amount table, matching
-// the layout of the reference "Distribution Statement" print-out.
-function _buildStandardFormatHTML() {
+// Reads the live Create-PI form into the same normalized shape that
+// _buildStandardFormatHTML() / printStandardFormatForOrder() consume, so
+// both the "print while creating" and "print from Order Register" paths
+// share one builder instead of two divergent implementations.
+function _getStandardFormatDataFromForm() {
   const client    = document.getElementById('pi-client')?.value.trim() || '';
+  const sales     = document.getElementById('pi-sales')?.value.trim() || '';
   const productEl = document.getElementById('pi-product');
   const productText = productEl?.options[productEl.selectedIndex]?.text || '';
   const shade     = document.getElementById('pi-shade')?.value.trim() || '';
@@ -5598,42 +5733,74 @@ function _buildStandardFormatHTML() {
   const primaryTotal = parseFloat(totalText.replace(/[₹,\s]/g,'')) || 0;
   const date      = document.getElementById('pi-date')?.value || '';
   const displayDate = date ? fmtDateOnly(date) : fmtDateOnly();
+  // Group — fixed, mandatory dropdown (validated in printStandardFormatPI
+  // before this runs, so this is guaranteed non-empty here)
+  const group = (document.getElementById('pi-group')?.value || '').trim();
 
   const packParts = packVal.split('|');
   const packSize  = parseFloat(packParts[0]) || 0;
   const packUnit  = packParts[1] || 'L';
   const primaryVol = packSize * qty;
 
-  const extraRows = _collectExtraRows();
+  const extraRows = _collectExtraRows().map(r => ({
+    productText: r.productText, shade: r.shade, packText: r.packText,
+    qty: r.qty, rate: r.rate, amount: r.amount, litres: r.litres, unit: r.unit, group: r.group
+  }));
 
-  const fmtAmt = (n) => n.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-  const fmtVol = (n, unit) => _fmtPlainNum(n) + ' ' + (unit === 'kg' ? 'Kg.' : 'Ltr.');
-  const itemLabel = (name, shd, pack) => _escHTML(name) + (shd ? ' - ' + _escHTML(shd) : '') + (pack ? ' ' + _escHTML(pack) : '');
+  return {
+    client, salesperson: sales, date: displayDate,
+    product: productText, shade, packText, qty, rate: finalRate, amount: primaryTotal,
+    litres: primaryVol, unit: packUnit, group, packVal,
+    extraRows
+  };
+}
+
+// Rebuilds a PI (primary product + any extra rows) as the Cartoon / Item /
+// Qty. / Total Ltr. / Rate / Amount table, matching the layout of the
+// reference "Distribution Statement" print-out. Group is shown next to
+// each product name.
+//
+// `data` is optional — when omitted, the current Create-PI form is read
+// (live "print while creating" flow). When supplied (e.g. from
+// printStandardFormatForOrder(), sourced from a saved order / Google
+// Sheets), that data drives the print instead — this is what lets the
+// Order Register regenerate a Standard Format for any order, including
+// ones that were never printed when originally created.
+function _buildStandardFormatHTML(data) {
+  const d = data || _getStandardFormatDataFromForm();
+
+  const fmtAmt = (n) => (n || 0).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const fmtVol = (n, unit) => _fmtPlainNum(n || 0) + ' ' + (unit === 'kg' ? 'Kg.' : 'Ltr.');
+  const itemLabel = (name, grp, shd, pack) =>
+    '<div class="item-name">' + _escHTML(name || '—') +
+      (grp ? ' <span class="item-group">[' + _escHTML(grp) + ']</span>' : '') +
+    '</div>' +
+    '<div class="item-sub">' + [shd, pack].filter(Boolean).map(_escHTML).join(' · ') + '</div>';
 
   let totalPcs = 0, totalVol = 0, grandTotal = 0;
   let rowsHTML = '';
 
   // Primary row
-  totalPcs += qty; totalVol += primaryVol; grandTotal += primaryTotal;
+  totalPcs += d.qty || 0; totalVol += d.litres || 0; grandTotal += d.amount || 0;
   rowsHTML += '<tr>' +
-    '<td class="c">' + _sfCartonCell(qty, packVal) + '</td>' +
-    '<td class="item">' + itemLabel(productText, shade, packText) + '</td>' +
-    '<td class="r">' + _fmtPlainNum(qty) + ' Pcs.</td>' +
-    '<td class="r">' + fmtVol(primaryVol, packUnit) + '</td>' +
-    '<td class="r">' + (finalRate ? _fmtPlainNum(finalRate) : '—') + '</td>' +
-    '<td class="r">' + fmtAmt(primaryTotal) + '</td>' +
+    '<td class="c">' + _sfCartonCell(d.qty, d.packVal || '') + '</td>' +
+    '<td class="item">' + itemLabel(d.product, d.group, d.shade, d.packText) + '</td>' +
+    '<td class="r">' + _fmtPlainNum(d.qty || 0) + ' Pcs.</td>' +
+    '<td class="r">' + fmtVol(d.litres, d.unit) + '</td>' +
+    '<td class="r">' + (d.rate ? _fmtPlainNum(d.rate) : '—') + '</td>' +
+    '<td class="r">' + fmtAmt(d.amount) + '</td>' +
   '</tr>';
 
   // Extra product rows
-  extraRows.forEach(function(r) {
-    totalPcs += r.qty; totalVol += r.litres; grandTotal += r.amount;
+  (d.extraRows || []).forEach(function(r) {
+    totalPcs += r.qty || 0; totalVol += r.litres || 0; grandTotal += r.amount || 0;
     const rPackVal = r.qty && r.litres ? (r.litres / r.qty) + '|' + (r.unit || 'L') : '';
     rowsHTML += '<tr>' +
       '<td class="c">' + _sfCartonCell(r.qty, rPackVal) + '</td>' +
-      '<td class="item">' + itemLabel(r.productText, r.shade, r.packText) + '</td>' +
-      '<td class="r">' + _fmtPlainNum(r.qty) + ' Pcs.</td>' +
+      '<td class="item">' + itemLabel(r.productText, r.group, r.shade, r.packText) + '</td>' +
+      '<td class="r">' + _fmtPlainNum(r.qty || 0) + ' Pcs.</td>' +
       '<td class="r">' + fmtVol(r.litres, r.unit) + '</td>' +
-      '<td class="r">' + _fmtPlainNum(r.rate) + '</td>' +
+      '<td class="r">' + _fmtPlainNum(r.rate || 0) + '</td>' +
       '<td class="r">' + fmtAmt(r.amount) + '</td>' +
     '</tr>';
   });
@@ -5648,12 +5815,26 @@ function _buildStandardFormatHTML() {
     '<td class="r">' + fmtAmt(grandTotal) + '</td>' +
   '</tr>';
 
-  return '<div class="sf-title">' + (client ? _escHTML(client) : 'Client') + '</div>' +
-    '<div class="sf-subtitle">Distribution Statement</div>' +
-    '<div class="sf-date">Date: ' + displayDate + '</div>' +
+  return '<div class="sf-page">' +
+    '<div class="sf-header">' +
+      '<div class="sf-company">Raunaq Paint Industry</div>' +
+      '<div class="sf-company-addr">Gatta No. 188, Navi Kot Nandana, BKT Sitapur Road, Lucknow 226201 &nbsp;·&nbsp; Ph: 09651111333 / 7607770994</div>' +
+    '</div>' +
+    '<div class="sf-title">Distribution Statement</div>' +
+    '<div class="sf-meta">' +
+      '<div><span class="sf-meta-label">Client</span><span class="sf-meta-value">' + (d.client ? _escHTML(d.client) : '—') + '</span></div>' +
+      '<div><span class="sf-meta-label">Date</span><span class="sf-meta-value">' + _escHTML(d.date || '') + '</span></div>' +
+      (d.salesperson ? '<div><span class="sf-meta-label">Sales Person</span><span class="sf-meta-value">' + _escHTML(d.salesperson) + '</span></div>' : '') +
+    '</div>' +
     '<table class="sf-table"><thead><tr>' +
       '<th>Cartoon</th><th>Item</th><th>Qty.</th><th>Total Ltr.</th><th>Rate</th><th>Amount</th>' +
-    '</tr></thead><tbody>' + rowsHTML + '</tbody></table>';
+    '</tr></thead><tbody>' + rowsHTML + '</tbody></table>' +
+    '<div class="sf-signblock">' +
+      '<div class="sf-sign"><div class="sf-sign-line"></div><div class="sf-sign-label">Prepared By</div></div>' +
+      '<div class="sf-sign"><div class="sf-sign-line"></div><div class="sf-sign-label">Authorized Signatory</div></div>' +
+    '</div>' +
+    '<div class="sf-footer">This is a Distribution Statement for internal dispatch reference. Quantities subject to ±10% variance.</div>' +
+  '</div>';
 }
 
 function printStandardFormatPI() {
@@ -5676,18 +5857,38 @@ function printStandardFormatPI() {
     showToast('Shade / Colour is required for Product ' + (parseInt(_missingShadeRows[0]) + 1) + '. Please fill it in before printing.', 'error');
     return;
   }
-  const groupWrap = document.getElementById('pi-group-wrap');
-  if (groupWrap && groupWrap.style.display !== 'none') {
+  {
     const groupVal = document.getElementById('pi-group')?.value || '';
-    if (!groupVal) { showToast('Please select a Group.', 'error'); return; }
+    if (!groupVal) { showToast('Group is required for Product 1. Please select a Group.', 'error'); return; }
+  }
+  {
+    const _missingGroupRows = _extraRowsMissingGroup();
+    if (_missingGroupRows.length) {
+      showToast('Group is required for Product ' + (parseInt(_missingGroupRows[0]) + 1) + '. Please select a Group before printing.', 'error');
+      return;
+    }
   }
   if (finalRateText === '₹ —') {
     showToast('Please calculate price first.', 'error'); return;
   }
 
   const bodyHTML = _buildStandardFormatHTML();
+  _openStandardFormatPrintWindow(bodyHTML);
+}
 
-  const win = window.open('', '_blank', 'width=1000,height=700');
+// Opens the Standard Format print popup for a given body HTML (built by
+// _buildStandardFormatHTML). Shared by printStandardFormatPI() (live
+// Create-PI form) and printStandardFormatForOrder() (Order Register, any
+// saved order) so there is exactly one print layout to keep correct.
+//
+// A4 PORTRAIT — previously this printed A4 landscape as a wide, sparse
+// "Cartoon/Item/Qty/Total Ltr/Rate/Amount" table. Switched to portrait
+// with narrower margins, a proper letterhead, a client/date/salesperson
+// meta bar, and a signature block so the page reads as a complete,
+// professional dispatch document rather than a bare table with a lot of
+// unused white space either side.
+function _openStandardFormatPrintWindow(bodyHTML) {
+  const win = window.open('', '_blank', 'width=900,height=1000');
   if (!win) { showToast('Please allow pop-ups for this site to print.', 'error'); return; }
 
   win.document.write(`<!DOCTYPE html>
@@ -5696,49 +5897,66 @@ function printStandardFormatPI() {
 <meta charset="UTF-8"/>
 <title>Distribution Statement</title>
 <style>
-  @page { size: A4 landscape; margin: 14mm 16mm; }
+  @page { size: A4 portrait; margin: 14mm 15mm; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: Arial, Helvetica, sans-serif;
     color: #000;
     background: #fff;
-    padding: 6mm 4mm;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+  .sf-page { display: flex; flex-direction: column; min-height: 100%; }
+  .sf-header { text-align: center; border-bottom: 2px solid #1C1410; padding-bottom: 8px; margin-bottom: 10px; }
+  .sf-company { font-size: 17pt; font-weight: 700; letter-spacing: 0.2px; }
+  .sf-company-addr { font-size: 8.5pt; color: #444; margin-top: 2px; }
   .sf-title {
     text-align: center;
-    font-size: 21pt;
+    font-size: 14pt;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.3px;
-    margin-bottom: 4px;
+    letter-spacing: 0.6px;
+    margin-bottom: 10px;
   }
-  .sf-subtitle { text-align: center; font-size: 12pt; margin-bottom: 3px; }
-  .sf-date { text-align: center; font-size: 9pt; color: #444; margin-bottom: 16px; }
+  .sf-meta {
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px 18px;
+    background: #f5f3f0; border: 1px solid #ddd6cc; border-radius: 4px;
+    padding: 8px 12px; margin-bottom: 12px; font-size: 9.5pt;
+  }
+  .sf-meta-label { text-transform: uppercase; letter-spacing: 0.4px; font-size: 7.5pt; color: #666; display: block; }
+  .sf-meta-value { font-weight: 700; }
   table.sf-table { width: 100%; border-collapse: collapse; border: 1px solid #000; }
   table.sf-table th, table.sf-table td {
     border: 1px solid #000;
-    padding: 7px 12px;
-    font-size: 10.5pt;
+    padding: 6px 8px;
+    font-size: 9pt;
     color: #000;
+    vertical-align: top;
   }
   table.sf-table thead th {
     background: #dcdcdc;
     font-weight: 700;
     text-align: center;
     border-bottom: 2px solid #000;
+    font-size: 8.5pt;
   }
   table.sf-table td.item { text-align: left; }
   table.sf-table td.c { text-align: center; }
-  table.sf-table td.r { text-align: right; }
+  table.sf-table td.r { text-align: right; white-space: nowrap; }
+  .item-name { font-weight: 700; }
+  .item-group { font-weight: 600; color: #92400E; }
+  .item-sub { font-size: 8pt; color: #555; margin-top: 1px; }
   table.sf-table tr.sf-total td {
     background: #f0f0f0;
     font-weight: 700;
     border-top: 2px solid #000;
   }
+  .sf-signblock { display: flex; justify-content: space-between; gap: 40px; margin-top: auto; padding-top: 48px; }
+  .sf-sign { flex: 1; text-align: center; }
+  .sf-sign-line { border-top: 1px solid #000; margin-bottom: 4px; }
+  .sf-sign-label { font-size: 8.5pt; color: #444; }
+  .sf-footer { font-size: 7.5pt; color: #777; text-align: center; margin-top: 14px; }
   @media print {
-    body { padding: 0; }
     .no-print { display: none !important; }
   }
 </style>
@@ -5764,6 +5982,95 @@ function printStandardFormatPI() {
   // fire reliably after Cancel.
   win.onload = function() { setTimeout(function () { win.print(); }, 400); };
   win.onafterprint = function () { win.close(); };
+}
+
+// ============================================================
+// PRINT STANDARD FORMAT — FROM ORDER REGISTER
+// Generates the same Standard Format print for ANY saved order, even one
+// that was never printed at the time it was created. Tries to pull the
+// order fresh from Google Sheets first (requirement: retrieve the saved
+// PI/order data directly from Sheets) and falls back to the in-memory
+// sessionOrders copy if the fetch fails (offline, cold-start, etc.).
+// ============================================================
+async function printStandardFormatForOrder(idx) {
+  let o = sessionOrders[idx];
+  if (!o) { showToast('Order not found.', 'error'); return; }
+
+  const sheetId = 'ORD-' + o.id;
+  if (_sheetsConnected) {
+    showToast('Fetching saved order from Google Sheets…', 'info');
+    const res = await _sheetsGet('getOrderById', { id: sheetId });
+    if (res && res.success && res.order) {
+      o = _normalizeOrderFromSheetRow(res.order, o);
+    } else {
+      showToast('Could not reach Google Sheets — printing from the last locally saved copy of this order.', 'info');
+    }
+  }
+
+  if (!o.product && !o.client) {
+    showToast('This order has no data to print.', 'error');
+    return;
+  }
+
+  // FIX (NUGS/Qty not showing in Order Register → Standard Format): this
+  // used to hardcode packVal: '' here, so _sfCartonCell() could never
+  // resolve a pack size/unit and always fell back to '—'. Recover the raw
+  // "size|unit" value (e.g. "20|L") the same way editOrderPI() does —
+  // first from the saved _formState, then by resolving the display text
+  // (e.g. "20 L") back to its select value, and finally by computing it
+  // straight from litres/qty if neither of those is available.
+  const _sfPackVal = (o._formState && o._formState.packVal) ||
+    _resolvePackValFromText(o.pack) ||
+    (o.qty ? (((o.ltr || 0) / o.qty) + '|L') : '');
+
+  const data = {
+    client: o.client || '', salesperson: o.sales || '',
+    date: (function(d){ if(!d) return fmtDateOnly(); const dt = new Date(d); return isNaN(dt) ? d : fmtDateOnly(dt); })(o.date),
+    product: o.product || '', shade: o.shade || '', packText: o.pack || '',
+    qty: o.qty || 0, rate: o.finalRate || 0, amount: o.totalAmount || 0,
+    litres: o.ltr || 0, unit: 'L', group: o.group || 'Group - Not Applicable', packVal: _sfPackVal,
+    extraRows: (o.extraRows || []).map(r => ({
+      productText: r.productText, shade: r.shade, packText: r.packText,
+      qty: r.qty, rate: r.rate, amount: r.amount, litres: r.litres, unit: r.unit,
+      group: r.group || 'Group - Not Applicable'
+    }))
+  };
+
+  const bodyHTML = _buildStandardFormatHTML(data);
+  _openStandardFormatPrintWindow(bodyHTML);
+}
+
+// Normalizes the raw row returned by the backend's getOrderById action
+// (Sheets column names, JSON-string Extra_Rows/Form_State) into the same
+// shape sessionOrders entries use, merging over the local copy so any
+// field the Sheets row doesn't have yet falls back to what's in memory.
+function _normalizeOrderFromSheetRow(row, localFallback) {
+  let extraRows = localFallback?.extraRows || [];
+  try {
+    const raw = row.Extra_Rows_JSON || row.extraRows;
+    if (raw) extraRows = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch (e) { /* keep local fallback */ }
+
+  return {
+    id: localFallback?.id,
+    date: row.Date || row.date || localFallback?.date,
+    client: row.Client || row.client || localFallback?.client,
+    sales: row.Sales_Person || row.sales || localFallback?.sales,
+    region: row.Region || row.region || localFallback?.region,
+    product: row.Product || row.product || localFallback?.product,
+    shade: row.Shade || row.shade || localFallback?.shade,
+    pack: row.Pack || row.pack || localFallback?.pack,
+    qty: parseFloat(row.Qty || row.qty) || localFallback?.qty || 0,
+    finalRate: parseFloat(row.Final_Rate || row.finalRate) || localFallback?.finalRate || 0,
+    totalAmount: parseFloat(row.Total_Amount || row.totalAmount) || localFallback?.totalAmount || 0,
+    group: row.Group || row.group || localFallback?.group || 'Group - Not Applicable',
+    address: row.Address || row.address || localFallback?.address || '',
+    comment: row.Comment || row.comment || localFallback?.comment || '',
+    outstanding: parseFloat(row.Outstanding || row.outstanding) || localFallback?.outstanding || 0,
+    ltr: localFallback?.ltr || 0,
+    extraRows: Array.isArray(extraRows) ? extraRows : [],
+    _formState: localFallback?._formState
+  };
 }
 
 // ============================================================
@@ -5830,11 +6137,19 @@ function addExtraProductRow() {
         <input type="number" id="xp-dpl-${id}" class="form-input" placeholder="0.00" step="0.01" style="font-size:13px;width:100%;" oninput="xpCalcAmount(${id})" />
       </div>
     </div>
-    <!-- Group selector — shown only when selected product has groups -->
-    <div id="xp-group-wrap-${id}" style="display:none;margin-top:8px;">
+    <!-- Group — fixed classification list, always visible & mandatory (same 8 options as Product 1) -->
+    <div id="xp-group-wrap-${id}" style="margin-top:8px;">
       <label class="form-label" style="font-size:10px;">Group *</label>
       <select id="xp-group-${id}" class="form-input" style="font-size:13px;" onchange="xpAutoFillRate(${id})">
         <option value="">— Select Group —</option>
+        <option value="Group I">Group I</option>
+        <option value="Group II">Group II</option>
+        <option value="Group III">Group III</option>
+        <option value="Group IV">Group IV</option>
+        <option value="Group V">Group V</option>
+        <option value="Group VI">Group VI</option>
+        <option value="Group - Other Items">Group - Other Items</option>
+        <option value="Group - Not Applicable">Group - Not Applicable</option>
       </select>
     </div>
     <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
@@ -5874,86 +6189,14 @@ function xpHandleProductChange(id) {
   xpAutoFillRate(id);
 }
 
-// Build the group dropdown for extra row (mirrors updatePIGroupSelector logic)
+// Group is now a fixed classification dropdown (Group I–VI / Other Items /
+// Not Applicable) — the same 8 options are baked into the row's HTML
+// (see addExtraProductRow), so there is no per-product option list to
+// build anymore. Kept as a no-op stub (rather than deleted) so the call
+// in xpHandleProductChange() stays harmless if anything else references
+// it. Selecting a product no longer touches or resets the Group field.
 function xpUpdateGroupSelector(id) {
-  const productSel  = document.getElementById('xp-product-' + id);
-  const groupWrap   = document.getElementById('xp-group-wrap-' + id);
-  const groupSel    = document.getElementById('xp-group-' + id);
-  if (!productSel || !groupWrap || !groupSel) return;
-
-  const productVal = productSel.value;
-  const pid = productVal ? parseInt(productVal.split('|')[0]) : null;
-  if (!pid) { groupWrap.style.display = 'none'; groupSel.innerHTML = ''; return; }
-
-  const prod = productsDB.find(p => p.id === pid);
-  if (!prod) { groupWrap.style.display = 'none'; return; }
-
-  const priceData = window._PLS_PRICE_DATA || PRICE_DATA;
-  let optionHTML = '<option value="">— Select Group —</option>';
-  let hasGroups = false;
-
-  if (priceData) {
-    const sectionKey = prod.type === 'fixed' ? 'fixed' : 'master';
-    const sectionData = priceData[sectionKey] || {};
-    const resolvedKey = _resolvePriceDataKey(prod.name, sectionData);
-    const productEntry = resolvedKey ? sectionData[resolvedKey] : null;
-    if (productEntry) {
-      const groupKeys = Object.keys(productEntry);
-      const isSingleTrivial = groupKeys.length === 1 && (groupKeys[0] === 'NA' || groupKeys[0] === '—' || groupKeys[0] === '');
-      if (isSingleTrivial) {
-        // Auto-select silently, hide selector
-        groupSel.innerHTML = `<option value="${groupKeys[0]}" selected>${groupKeys[0]}</option>`;
-        groupWrap.style.display = 'none';
-        return;
-      }
-      groupKeys.forEach(g => {
-        const grpData = productEntry[g];
-        const isSubProduct = grpData && typeof grpData === 'object' && !grpData.packs;
-        if (isSubProduct) {
-          Object.keys(grpData).forEach(subKey => {
-            const subData = grpData[subKey];
-            const shadeHint = subData && subData.shade ? ' — ' + subData.shade : '';
-            optionHTML += `<option value="${subKey}">${subKey}${shadeHint}</option>`;
-          });
-        } else {
-          const shade = grpData && grpData.shade ? grpData.shade : '';
-          const label = (g === 'NA' || g === '—' || g === '') ? 'Standard' : g;
-          const shadePreview = shade ? (' — ' + shade.split(',').slice(0, 3).join(', ') + (shade.split(',').length > 3 ? '…' : '')) : '';
-          optionHTML += `<option value="${g}">${label}${shadePreview}</option>`;
-        }
-        hasGroups = true;
-      });
-    }
-  }
-
-  // Fallback: priceDB
-  if (!hasGroups) {
-    const section = prod.type === 'fixed' ? 'fixed' : 'master';
-    const sec = (priceDB[section] || {})[pid] || priceDB.bj?.[pid];
-    if (sec) {
-      if (sec.groups && sec.groups.length > 0) {
-        sec.groups.forEach(g => {
-          optionHTML += `<option value="${g.label}">${g.label}${g.shades ? ' — ' + g.shades : ''}</option>`;
-        });
-        hasGroups = true;
-      } else if (sec.named && sec.named.length > 0) {
-        sec.named.forEach(n => {
-          optionHTML += `<option value="${n.name}">${n.name}</option>`;
-        });
-        hasGroups = true;
-      }
-    }
-  }
-
-  if (hasGroups) {
-    groupSel.innerHTML = optionHTML;
-    groupWrap.style.display = 'block';
-    // Auto-select first group
-    if (groupSel.options.length > 1) groupSel.selectedIndex = 1;
-  } else {
-    groupSel.innerHTML = '';
-    groupWrap.style.display = 'none';
-  }
+  // intentionally empty — Group options are fixed, not product-derived
 }
 
 // Auto-fill DPL rate for extra product rows — uses own row's group selector
@@ -6121,6 +6364,12 @@ function _collectExtraRows() {
     const shade      = (document.getElementById('xp-shade-' + id)?.value || '').trim();
     const qty        = parseFloat(document.getElementById('xp-qty-' + id)?.value) || 0;
     const dpl        = parseFloat(document.getElementById('xp-dpl-' + id)?.value) || 0;
+    // Group is a fixed, mandatory classification dropdown (Group I–VI /
+    // Other Items / Not Applicable) — no free text, no auto-default.
+    // _extraRowsMissingGroup() blocks generate/save/print while this is
+    // still blank, so by the time this value is actually used it is
+    // guaranteed to be one of the 8 fixed options.
+    const group      = (document.getElementById('xp-group-' + id)?.value || '').trim();
 
     if (!productSel?.value || !packSel?.value || !qty || !dpl) return; // skip incomplete rows
 
@@ -6141,7 +6390,7 @@ function _collectExtraRows() {
     // it's correctly recognised as "missing" by validation and by the table
     // renderer's own '—' display fallback (which only kicks in for truly
     // empty values).
-    rows.push({ productText, shade, packText, qty, dpl, rate, amount, litres, unit: unit || 'L' });
+    rows.push({ productText, shade, packText, qty, dpl, rate, amount, litres, unit: unit || 'L', group });
   });
   return rows;
 }
@@ -6167,6 +6416,26 @@ function _extraRowsMissingShade() {
     const shade = (document.getElementById('xp-shade-' + id)?.value || '').trim();
     // Only flag rows the user has actually started filling in (product chosen)
     if (productSel?.value && !shade) missing.push(id);
+  });
+  return missing;
+}
+
+// Group is a fixed, mandatory classification dropdown (Group I–VI / Other
+// Items / Not Applicable) — no free text — on every product row of a PI:
+// Product 1 (primary) and every "+ Add Product" row (2, 3, 4…). Returns
+// the list of extra-row ids that have a product selected but no Group
+// picked yet.
+function _extraRowsMissingGroup() {
+  const container = document.getElementById('pi-extra-products');
+  if (!container) return [];
+  const missing = [];
+  container.querySelectorAll('[id^="extra-row-"]').forEach(row => {
+    const idMatch = row.id.match(/extra-row-(\d+)/);
+    if (!idMatch) return;
+    const id = idMatch[1];
+    const productSel = document.getElementById('xp-product-' + id);
+    const groupVal   = (document.getElementById('xp-group-' + id)?.value || '').trim();
+    if (productSel?.value && !groupVal) missing.push(id);
   });
   return missing;
 }
@@ -6206,10 +6475,16 @@ function saveOrder() {
       return;
     }
   }
-  const _groupWrapSave = document.getElementById('pi-group-wrap');
-  if (_groupWrapSave && _groupWrapSave.style.display !== 'none') {
+  {
     const _groupValSave = document.getElementById('pi-group')?.value || '';
-    if (!_groupValSave) { showToast('Please select a Group.', 'error'); return; }
+    if (!_groupValSave) { showToast('Group is required for Product 1. Please select a Group.', 'error'); return; }
+  }
+  {
+    const _missingGroupRowsSave = _extraRowsMissingGroup();
+    if (_missingGroupRowsSave.length) {
+      showToast('Group is required for Product ' + (parseInt(_missingGroupRowsSave[0]) + 1) + '. Please select a Group before saving the order.', 'error');
+      return;
+    }
   }
 
   const finalRate = parseFloat(finalRateText.replace('₹ ','')) || 0;
@@ -6229,7 +6504,9 @@ function saveOrder() {
   const piComment = document.getElementById('pi-comment')?.value || '';
   const piOutstanding = parseFloat(document.getElementById('pi-outstanding')?.value) || 0;
   const productId = productEl.value || '';
-  const group = document.getElementById('pi-group')?.value || '';
+  // Group — fixed, mandatory dropdown (Group I–VI / Other Items / Not
+  // Applicable). Validated above, so this is guaranteed non-empty here.
+  const group = (document.getElementById('pi-group')?.value || '').trim();
   const packVal = packEl.value || '';
 
   // Collect extra product rows
@@ -6238,11 +6515,21 @@ function saveOrder() {
   const order = {
     id: Date.now(),
     date: piDate || nowDateTime(), client, sales, region, product: productText, shade, pack: packText,
-    qty, finalRate, totalAmount,
+    qty, finalRate, totalAmount, group,
     freightType, freight: freightAmt,
     address: piAddress, pcs, ltr,
     comment: piComment, outstanding: piOutstanding,
-    extraRows: extraRows,   // ← save extra product rows
+    extraRows: extraRows,   // ← save extra product rows (each carries its own .group)
+    // FIX (a brand-new, never-registered order showed "✓ In DB" on a
+    // product just because some OTHER order shared the same
+    // client+product+shade): registeredPI must be a definite, known
+    // "nothing registered yet" object from the moment an order is
+    // created — not left undefined — otherwise the Orders table's
+    // rendering treats it as unknown/legacy and falls back to a text
+    // match against piFinalDB, which isn't a unique key. Only orders
+    // that genuinely predate this tracking (already sitting in the
+    // Sheet before this feature shipped) should ever hit that fallback.
+    registeredPI: { primary: null, extras: extraRows.map(() => null) },
     // Store form values for re-editing
     _formState: {
       client, sales, region, productId, shade, packVal, qty,
@@ -6254,7 +6541,14 @@ function saveOrder() {
 
   // If editing an existing order, replace it; otherwise push new
   if (typeof window._editingOrderIdx === 'number' && window._editingOrderIdx >= 0) {
-    order.id = sessionOrders[window._editingOrderIdx]?.id || order.id;
+    const prevOrder = sessionOrders[window._editingOrderIdx];
+    order.id = prevOrder?.id || order.id;
+    // Carry over which product slot(s) were already registered to the
+    // Final PI Database — editing an order rebuilds it fresh from the
+    // form, and without this the "In DB" status would locally (though
+    // not on the Sheet — the backend preserves it there regardless)
+    // revert to "Not Saved" the moment a registered order gets edited.
+    if (prevOrder?.registeredPI) order.registeredPI = prevOrder.registeredPI;
     sessionOrders[window._editingOrderIdx] = order;
     window._editingOrderIdx = -1;
     const banner = document.getElementById('pi-edit-mode-banner');
@@ -6361,45 +6655,80 @@ function renderOrderTable() {
     let rows = '';
     const reversed = filteredWithIdx.slice().reverse();
     reversed.forEach(({ o, idx }) => {
-    const isInDB = finalDBKeySet.has(
-      (o.client||'').trim().toLowerCase() + '||' +
-      (o.product||'').trim().toLowerCase() + '||' +
-      (o.shade||'').trim().toLowerCase()
-    );
-    const dbBadge = isInDB
-      ? `<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 7px;border-radius:5px;background:var(--green-light);color:var(--green-accent);font-weight:600;">✓ In DB</span>`
-      : `<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 7px;border-radius:5px;background:#FEF3C7;color:#92400E;font-weight:600;">Not Saved</span>`;
-
     const extraRows = o.extraRows || [];
+    // Group travels with each product row (Product Name, Group and Shade
+    // are three independent fields — Group is never folded into or
+    // derived from Product Name/Shade here).
     const allProducts = [
-      { product: o.product, shade: o.shade || '—', pack: o.pack, qty: o.qty, rate: o.finalRate, amount: o.totalAmount, isPrimary: true },
-      ...extraRows.map(r => ({ product: r.productText || '—', shade: r.shade || '—', pack: r.packText || '—', qty: r.qty, rate: r.rate || 0, amount: r.amount || 0, isPrimary: false }))
+      // FIX: the primary row used to have no fallback for a missing
+      // product/pack (unlike the extra rows below, which already used
+      // '—'). A blank o.product rendered as an empty cell — or, on
+      // multi-product orders, as just the bare "#1" row-number badge with
+      // nothing after it, which is what made the Product Name column look
+      // like it was "showing as #".
+      { product: o.product || '—', shade: o.shade || '—', group: o.group || o._formState?.group || '—', pack: o.pack || '—', qty: o.qty, rate: o.finalRate, amount: o.totalAmount, isPrimary: true },
+      ...extraRows.map(r => ({ product: r.productText || '—', shade: r.shade || '—', group: r.group || '—', pack: r.packText || '—', qty: r.qty, rate: r.rate || 0, amount: r.amount || 0, isPrimary: false }))
     ];
     const displayDate = _fmtOrderDate(o.date);
     const regionBadge = `<span class="badge ${o.region==='bihar'?'':'badge-saffron'}" style="${o.region==='bihar'?'background:#FEF3C7;color:#92400E;':''}">${o.region==='bihar'?'Bihar/JH':'Normal'}</span>`;
-    const actions = `<div style="display:flex;gap:5px;flex-wrap:wrap;">
+    // FIX (Register option missing for products 2+ in a multi-product PI):
+    // Edit PI / Standard Format act on the whole order, so those stay on
+    // the first product row only. Register is now built PER PRODUCT ROW
+    // below instead — clicking it from any row still registers every
+    // unregistered product in the order (registerOrderToFinalDB already
+    // loops all products), but every product line now visibly has its
+    // own Register affordance, and skips products that are already
+    // registered instead of silently doing nothing about them.
+    const wholeOrderActions = `<div style="display:flex;gap:5px;flex-wrap:wrap;">
       <button class="btn btn-sm btn-outline" onclick="editOrderPI(${idx})">
         <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         Edit PI
       </button>
-      <button class="btn btn-sm" style="background:#8B5CF6;color:#fff;" onclick="registerOrderToFinalDB(${idx})">
-        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>
-        Register
+      <button class="btn btn-sm" style="background:#1C1410;color:#fff;" onclick="printStandardFormatForOrder(${idx})" title="Print this order's Standard Format, even if it was never printed at creation time">
+        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+        Standard Format
       </button>
     </div>`;
+    const registerBtn = `<button class="btn btn-sm" style="background:#8B5CF6;color:#fff;" onclick="registerOrderToFinalDB(${idx})" title="Register this order's unregistered product(s) to the Final PI Database">
+        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>
+        Register
+      </button>`;
 
-    // Each product gets its own complete row with all columns filled
+    // Each product gets its own complete row with all columns filled,
+    // and its own accurate "In DB" status. FIX: this used to match by
+    // client+product+shade TEXT against piFinalDB, which isn't a unique
+    // key — the same client re-ordering the same product/shade on a
+    // different date shares that same text, so registering ONE order
+    // made every OTHER order sharing that combo falsely show "In DB"
+    // too (41 of 187 distinct combos repeat in the live data). Now uses
+    // a direct piNumber reference stored on the order itself
+    // (o.registeredPI, set at the moment of actual registration — see
+    // confirmFinalizePI) and only falls back to the old text match for
+    // orders that predate this tracking entirely (o.registeredPI is
+    // null/undefined, never touched by the new code).
     allProducts.forEach((p, pi) => {
       const isFirst  = pi === 0;
+      const isInDB = o.registeredPI
+        ? !!(pi === 0 ? o.registeredPI.primary : (o.registeredPI.extras && o.registeredPI.extras[pi - 1]))
+        : finalDBKeySet.has(
+            (o.client||'').trim().toLowerCase() + '||' +
+            (p.product||'').trim().toLowerCase() + '||' +
+            (p.shade||'').trim().toLowerCase()
+          );
+      const dbBadge = isInDB
+        ? `<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 7px;border-radius:5px;background:var(--green-light);color:var(--green-accent);font-weight:600;">✓ In DB</span>`
+        : `<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 7px;border-radius:5px;background:#FEF3C7;color:#92400E;font-weight:600;">Not Saved</span>`;
       const rowBorder = isFirst ? 'border-top:2px solid var(--stone);' : 'border-top:1px dashed var(--stone);';
       const bgStyle   = p.isPrimary ? '' : 'background:rgba(242,235,228,0.5);';
       const numBadge  = allProducts.length > 1
         ? `<span style="font-size:9px;background:${p.isPrimary?'var(--saffron-pale)':'var(--stone)'};color:${p.isPrimary?'var(--saffron)':'var(--ink-muted)'};border-radius:3px;padding:1px 5px;font-weight:700;margin-right:4px;">#${pi+1}</span>`
         : '';
+      const actionsCell = `<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;">${isFirst ? wholeOrderActions : ''}${registerBtn}</div>`;
       rows += `<tr style="${rowBorder}${bgStyle}">
         <td style="font-size:12.5px;">${displayDate}</td>
         <td style="font-weight:500;">${o.client}</td>
         <td style="font-size:12.5px;max-width:160px;">${numBadge}${p.product}</td>
+        <td style="font-size:11.5px;color:var(--ink-muted);">${p.group}</td>
         <td>${p.shade}</td>
         <td>${p.pack}</td>
         <td style="text-align:center;">${p.qty}</td>
@@ -6408,12 +6737,12 @@ function renderOrderTable() {
         <td>${regionBadge}</td>
         <td style="font-size:11.5px;color:var(--ink-muted);">${o.freightType||'—'}</td>
         <td>${dbBadge}</td>
-        <td>${isFirst ? actions : ''}</td>
+        <td>${actionsCell}</td>
       </tr>`;
     });
     });
 
-    const table = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr><th>Date</th><th>Client</th><th>Product</th><th>Shade</th><th>Pack</th><th>Qty</th><th>Rate</th><th>Total</th><th>Region</th><th>Freight</th><th>DB Status</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    const table = `<div style="overflow-x:auto;"><table class="data-table"><thead><tr><th>Date</th><th>Client</th><th>Product</th><th>Group</th><th>Shade</th><th>Pack</th><th>Qty</th><th>Rate</th><th>Total</th><th>Region</th><th>Freight</th><th>DB Status</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div>`;
     if (container) container.innerHTML = table;
   }
 
@@ -6442,11 +6771,41 @@ function clearOrderFilters() {
 // ============================================================
 // EDIT ORDER PI — re-populate the Create PI form from a saved order
 // ============================================================
+// Resolve a saved pack display text (e.g. "20 L") back to its <select>
+// value (e.g. "20|L") by scanning the pi-pack option list. Falls back to
+// '' when no match is found (user can still re-pick the pack manually).
+function _resolvePackValFromText(packText) {
+  if (!packText) return '';
+  const packSel = document.getElementById('pi-pack');
+  if (!packSel) return '';
+  const opt = Array.from(packSel.options).find(o => o.text.trim() === String(packText).trim());
+  return opt ? opt.value : '';
+}
+
 function editOrderPI(idx) {
   const o = sessionOrders[idx];
   if (!o) return;
-  const fs = o._formState;
-  if (!fs) { showToast('Form state not available for this order — it may have been created before editing was supported.', 'error'); return; }
+  // FIX ("Form state not available…"): _formState used to be required and
+  // editing hard-failed without it. Orders loaded fresh from Google Sheets
+  // are now given a synthesized _formState in _applyLoadedSheetsData() —
+  // but as a last line of defence (e.g. an order object built by older/
+  // other code paths that skipped that step), synthesize one here too
+  // instead of refusing to edit.
+  let fs = o._formState;
+  if (!fs) {
+    const matchedProd = (typeof productsDB !== 'undefined' ? productsDB : []).find(p => p.name === o.product);
+    fs = {
+      client: o.client, sales: o.sales, region: o.region,
+      productId: matchedProd ? matchedProd.id : '',
+      shade: o.shade, packVal: '', qty: o.qty,
+      dpl: o.finalRate, discPerLitre: 0, discTrade: 0, discLoyalty: 0, discCash: 0,
+      freightType: o.freightType || 'To Pay', freight: o.freight || 0,
+      address: o.address || '', comment: o.comment || '', outstanding: o.outstanding || 0,
+      date: o.date, group: o.group || '',
+      _synthesized: true
+    };
+    showToast('This order predates full edit-history — some fields (discounts, exact pack) may need re-entering.', 'info');
+  }
 
   showPage('create-pi');
 
@@ -6470,17 +6829,30 @@ function editOrderPI(idx) {
     if (document.getElementById('pi-comment')) document.getElementById('pi-comment').value = fs.comment || '';
     if (document.getElementById('pi-outstanding')) document.getElementById('pi-outstanding').value = fs.outstanding || '';
 
-    // Restore product
+    // Restore product. FIX: previously gated on fs.productId being
+    // resolvable — a synthesized state whose product name couldn't be
+    // matched in productsDB (renamed/discontinued product) meant shade,
+    // qty, pack, DPL etc. never restored either, even though we have that
+    // data right on the order. Restore everything we have regardless, and
+    // only skip the product <select>/dependent-dropdown wiring when we
+    // truly can't resolve a productId.
+    const _piPackValFallback = fs.packVal || _resolvePackValFromText(o.pack);
+
+    // Group restore is independent of product resolution now (it's a
+    // fixed, static dropdown — not derived from the selected product), so
+    // it must not live inside the "product resolved" branch below. Doing
+    // it here means it restores correctly even for orders whose product
+    // text couldn't be matched back to a productsDB entry.
+    if (document.getElementById('pi-group')) {
+      document.getElementById('pi-group').value = fs.group || '';
+    }
+
     if (fs.productId && document.getElementById('pi-product')) {
       document.getElementById('pi-product').value = fs.productId;
       handleProductChange();
       setTimeout(function() {
-        if (fs.group && document.getElementById('pi-group')) {
-          document.getElementById('pi-group').value = fs.group;
-          handleGroupChange && handleGroupChange();
-        }
-        if (fs.packVal && document.getElementById('pi-pack')) {
-          document.getElementById('pi-pack').value = fs.packVal;
+        if (_piPackValFallback && document.getElementById('pi-pack')) {
+          document.getElementById('pi-pack').value = _piPackValFallback;
         }
         document.getElementById('pi-shade').value = fs.shade || '';
         document.getElementById('pi-qty').value = fs.qty || '';
@@ -6499,7 +6871,48 @@ function editOrderPI(idx) {
         // Mark this as editing (so Save replaces original)
         window._editingOrderIdx = idx;
       }, 100);
+    } else {
+      // Product couldn't be resolved to a productsDB entry — still restore
+      // the raw text fields so the user isn't starting from a blank form.
+      if (document.getElementById('pi-product-search')) document.getElementById('pi-product-search').value = o.product || '';
+      if (document.getElementById('pi-shade')) document.getElementById('pi-shade').value = fs.shade || '';
+      if (document.getElementById('pi-qty')) document.getElementById('pi-qty').value = fs.qty || '';
+      if (document.getElementById('pi-dpl')) document.getElementById('pi-dpl').value = fs.dpl || '';
+      if (_piPackValFallback && document.getElementById('pi-pack')) document.getElementById('pi-pack').value = _piPackValFallback;
+      calcLitres();
+      calcPrice();
+      window._editingOrderIdx = idx;
     }
+
+    // Restore extra product rows (Product 2, 3, 4…), each with its own
+    // Group — previously not restored at all, so editing a multi-product
+    // PI silently dropped every product after the first.
+    _clearExtraRows();
+    (o.extraRows || []).forEach(function(r) {
+      addExtraProductRow();
+      const xid = _extraRowCount;
+      setTimeout(function() {
+        const prodSel = document.getElementById('xp-product-' + xid);
+        if (prodSel) {
+          const opt = Array.from(prodSel.options).find(function(op) { return op.text === r.productText; });
+          if (opt) { prodSel.value = opt.value; xpHandleProductChange(xid); }
+        }
+        setTimeout(function() {
+          if (r.group && document.getElementById('xp-group-' + xid)) {
+            document.getElementById('xp-group-' + xid).value = r.group;
+          }
+          const packSel = document.getElementById('xp-pack-' + xid);
+          if (packSel && r.packText) {
+            const packOpt = Array.from(packSel.options).find(function(op) { return op.text === r.packText; });
+            if (packOpt) packSel.value = packOpt.value;
+          }
+          if (document.getElementById('xp-shade-' + xid)) document.getElementById('xp-shade-' + xid).value = r.shade || '';
+          if (document.getElementById('xp-qty-' + xid)) document.getElementById('xp-qty-' + xid).value = r.qty || '';
+          if (document.getElementById('xp-dpl-' + xid)) document.getElementById('xp-dpl-' + xid).value = r.dpl || '';
+          xpCalcAmount(xid);
+        }, 60);
+      }, 30);
+    });
   }, 80);
 
   showToast('PI loaded for editing. Make changes and click "Generate PI Preview" → "Save Order" to update.', 'info');
@@ -6517,10 +6930,14 @@ function registerOrderToFinalDB(idx) {
   const o = sessionOrders[idx];
   if (!o) return;
 
-  // Build list of all products in this order (primary + extras)
+  // Build list of all products in this order (primary + extras), each
+  // tagged with exactly WHERE it lives on the order (_slot) so
+  // registration status can be tracked by direct reference instead of
+  // matching text.
   const extraRows = o.extraRows || [];
-  const allProducts = [
+  const allProductsRaw = [
     {
+      _slot: 'primary',
       productName: o.product,
       productId: o._formState?.productId || '',
       shade: o.shade,
@@ -6531,8 +6948,11 @@ function registerOrderToFinalDB(idx) {
       ltr: o.ltr || 0,
       finalRate: o.finalRate,
       totalAmount: o.totalAmount,
+      group: o.group || o._formState?.group || 'Group - Not Applicable',
     },
-    ...extraRows.map(r => ({
+    ...extraRows.map((r, i) => ({
+      _slot: 'extra',
+      _extraIdx: i,
       productName: r.productText || '',
       productId: '',
       shade: r.shade || '',
@@ -6543,8 +6963,30 @@ function registerOrderToFinalDB(idx) {
       ltr: r.litres || 0,
       finalRate: r.rate || 0,
       totalAmount: r.amount || 0,
+      group: r.group || 'Group - Not Applicable',
     }))
   ];
+
+  // FIX (registering one order marked OTHER, unrelated orders as "In DB"
+  // too): this used to dedupe by matching client+product+shade text
+  // against piFinalDB. That key isn't unique — the same client re-orders
+  // the same product/shade on different dates constantly (41 of 187
+  // distinct combos repeat in the live data), so registering one order
+  // made every other order sharing that combo falsely show "In DB" and
+  // get silently skipped by this same filter. Registration status is now
+  // tracked by DIRECT REFERENCE on the order itself (o.registeredPI),
+  // set the moment a product is actually registered — see
+  // confirmFinalizePI() — so it can never be confused with a
+  // similar-looking but different order.
+  const regMap = o.registeredPI || {};
+  const allProducts = allProductsRaw.filter(p =>
+    p._slot === 'primary' ? !regMap.primary : !(regMap.extras && regMap.extras[p._extraIdx])
+  );
+
+  if (!allProducts.length) {
+    showToast('All products in this order are already registered to the Final PI Database.', 'info');
+    return;
+  }
 
   // Store all products on the pending data so confirmFinalizePI can loop them
   _lastGeneratedOrder = {
@@ -6572,6 +7014,10 @@ function registerOrderToFinalDB(idx) {
     totalAmount: o.totalAmount,
     // All products list for multi-save
     _allProducts: allProducts,
+    // Which order this registration came from, so confirmFinalizePI can
+    // mark the exact primary/extra slot(s) that got registered (see
+    // registeredPI tracking above) once the save actually succeeds.
+    _sourceOrderIdx: idx,
   };
 
   populateSalespersonDropdowns();
@@ -6646,7 +7092,13 @@ function cancelClientForm() {
 function saveClient() {
   const name = document.getElementById('cl-name').value.trim();
   if (!name) { showToast('Client name is required.', 'error'); return; }
+  // FIX: client records previously had no stable id at all — every save
+  // (including edits) synced to Sheets with a freshly-minted id, so
+  // editing a client created a duplicate row instead of updating the
+  // original, and there was no way to identify a row for deletion.
+  const existingClient = editingClientIndex >= 0 ? sessionClients[editingClientIndex] : null;
   const client = {
+    id: existingClient?.id || Date.now(),
     name,
     contact: document.getElementById('cl-contact').value.trim(),
     phone: document.getElementById('cl-phone').value.trim(),
@@ -6682,9 +7134,11 @@ function editClient(idx) {
 function deleteClient(idx) {
   if (!canDelete()) { showToast('Only admin can delete records.', 'error'); return; }
   if (!confirm('Delete this client?')) return;
+  const client = sessionClients[idx];
   sessionClients.splice(idx, 1);
   renderClientList();
   persistData();
+  if (client && client.id) _syncDeleteClient(client.id);   // ← Google Sheets sync (was missing entirely)
   showToast('Client deleted.', 'info');
 }
 
@@ -7334,16 +7788,16 @@ function renderPackCostTable(perLtr) {
       <td style="text-align:center;">${p.unitsPerCarton}</td>
       <td style="text-align:right;">₹${paintCost.toFixed(2)}</td>
       <td style="font-size:12px;color:var(--ink-muted);">
-        <input type="text" class="edit-inline" value="${pkg.containerCode||''}" style="width:100px;" onchange="if(!packagingMaster['${p.key}'])packagingMaster['${p.key}']={};packagingMaster['${p.key}'].containerCode=this.value" />
+        <input type="text" class="edit-inline" value="${pkg.containerCode||''}" style="width:100px;" onchange="_updatePackagingField('${p.key}','containerCode',this.value)" />
       </td>
       <td style="text-align:right;">
-        <input type="number" class="edit-inline" value="${containerCost}" style="width:70px;text-align:right;" onchange="if(!packagingMaster['${p.key}'])packagingMaster['${p.key}']={};packagingMaster['${p.key}'].containerCost=parseFloat(this.value)||0;recalcCosting();" />
+        <input type="number" class="edit-inline" value="${containerCost}" style="width:70px;text-align:right;" onchange="_updatePackagingField('${p.key}','containerCost',parseFloat(this.value)||0)" />
       </td>
       <td style="font-size:12px;color:var(--ink-muted);">
-        <input type="text" class="edit-inline" value="${pkg.cartonCode||''}" style="width:100px;" onchange="if(!packagingMaster['${p.key}'])packagingMaster['${p.key}']={};packagingMaster['${p.key}'].cartonCode=this.value" />
+        <input type="text" class="edit-inline" value="${pkg.cartonCode||''}" style="width:100px;" onchange="_updatePackagingField('${p.key}','cartonCode',this.value)" />
       </td>
       <td style="text-align:right;">
-        <input type="number" class="edit-inline" value="${pkg.cartonCost||0}" style="width:70px;text-align:right;" onchange="if(!packagingMaster['${p.key}'])packagingMaster['${p.key}']={};packagingMaster['${p.key}'].cartonCost=parseFloat(this.value)||0;recalcCosting();" />
+        <input type="number" class="edit-inline" value="${pkg.cartonCost||0}" style="width:70px;text-align:right;" onchange="_updatePackagingField('${p.key}','cartonCost',parseFloat(this.value)||0)" />
       </td>
       <td style="text-align:right;font-weight:700;color:var(--saffron);">₹${finalPack.toFixed(2)}</td>
       <td style="text-align:right;color:var(--ink-muted);">${dplRate != null ? '₹'+dplRate.toFixed(2) : '—'}</td>
@@ -9696,6 +10150,7 @@ function deleteSalesperson(id) {
   saveSalespersonMaster();
   renderSalespersonTable();
   populateSalespersonDropdowns();
+  _sheetsPost('deleteSalesperson', { spId: id });   // ← Google Sheets sync (was missing entirely)
 }
 
 function renderSalespersonTable() {
@@ -9932,7 +10387,12 @@ function deleteTransport(id) {
   saveTransportMasterDB();
   renderTransportTable();
   populateTransportDropdown();
-  _sheetsPost('deleteTransport', { transportId: id });
+  // FIX: this was sending { transportId: id } but the backend's doPost
+  // dispatcher reads body.tId for the deleteTransport action — the
+  // mismatch meant tId arrived undefined server-side, nothing matched,
+  // and the delete silently no-op'd (returning success) while the row
+  // stayed in the sheet forever.
+  _sheetsPost('deleteTransport', { tId: id });
 }
 
 function renderTransportTable() {
@@ -10038,6 +10498,11 @@ function confirmFinalizePI() {
       source: 'sales',
       comments: ord.comment || ord.comments || '',
       createdAt: new Date().toISOString(),
+      // Group — mandatory per product row (see _collectExtraRows /
+      // generatePI / saveOrder). Falls back to 'Group - Not Applicable' so
+      // this column is never blank even for legacy records that predate
+      // the field, or that predate the fixed 8-option enum.
+      group: prod.group || ord.group || 'Group - Not Applicable',
     };
   }
 
@@ -10054,6 +10519,30 @@ function confirmFinalizePI() {
     savedRecords.push(record);
   });
 
+  // FIX (registering one order falsely marked OTHER, unrelated orders as
+  // "In DB" too): mark the EXACT slot(s) on the order this registration
+  // came from — see registerOrderToFinalDB() — by direct reference,
+  // instead of relying on a client+product+shade text match against
+  // piFinalDB. That text key isn't unique: the same client re-ordering
+  // the same product/shade on a different date shares the same key, so
+  // registering one order used to make every other order sharing that
+  // combo falsely show as already registered.
+  if (ord._sourceOrderIdx != null && sessionOrders[ord._sourceOrderIdx]) {
+    const srcOrder = sessionOrders[ord._sourceOrderIdx];
+    if (!srcOrder.registeredPI) srcOrder.registeredPI = { primary: null, extras: [] };
+    productsToSave.forEach(function(prod, i) {
+      const piNum = savedRecords[i].piNumber;
+      if (prod._slot === 'primary') {
+        srcOrder.registeredPI.primary = piNum;
+      } else if (prod._slot === 'extra' && prod._extraIdx != null) {
+        srcOrder.registeredPI.extras[prod._extraIdx] = piNum;
+      }
+    });
+    // Persist the marker back to the Orders sheet so it survives a
+    // reload instead of only living in this tab's memory.
+    _syncOrder(srcOrder);
+  }
+
   savePiFinalDB();
   document.getElementById('finalize-pi-modal').classList.remove('open');
   updateFinalPIStats();
@@ -10063,10 +10552,25 @@ function confirmFinalizePI() {
   showToast('✅ ' + count + ' product' + (count > 1 ? 's' : '') + ' registered to Final PI DB!', 'success');
   _pendingFinalPIData = null;
 
-  // Sync all records to Google Sheets
+  // Sync all records to Google Sheets. The piNumber built above is just a
+  // provisional value for instant UI feedback — the backend now assigns
+  // the AUTHORITATIVE number (see saveFinalPI/_resolvePiNumber in
+  // Code.gs), because piFinalDB.length goes stale the moment more than
+  // one tab/session/user is involved, and that's exactly what produced
+  // duplicate PI numbers before this fix. If the backend had to correct
+  // it, quietly adopt the corrected number here so what's on screen
+  // always matches what's actually in the Sheet.
   savedRecords.forEach(function(record) {
     _sheetsPost('saveFinalPI', { data: record })
-      .then(function(res) { if (res && res.success) console.log('Synced PI#', record.piNumber); })
+      .then(function(res) {
+        if (res && res.success) {
+          console.log('Synced PI#', res.piNumber || record.piNumber);
+          if (res.piNumber && res.piNumber !== record.piNumber) {
+            record.piNumber = res.piNumber;
+            renderFinalPITable();
+          }
+        }
+      })
       .catch(function(err) { console.warn('saveFinalPI sheets error:', err); });
   });
 }
@@ -10145,7 +10649,7 @@ function renderFinalPITable() {
 
   container.innerHTML = `<table class="data-table">
     <thead><tr>
-      <th>PI Number</th><th>Date</th><th>Customer</th><th>Address</th><th>Product</th><th>Shade</th><th>Pack Size</th>
+      <th>PI Number</th><th>Date</th><th>Customer</th><th>Address</th><th>Product</th><th>Group</th><th>Shade</th><th>Pack Size</th>
       <th style="text-align:right;">Pcs</th><th style="text-align:right;">Ltr</th>
       <th>Salesperson</th><th>Freight</th>
       <th style="text-align:right;">Price</th><th style="text-align:right;">Total Value</th><th>Action</th>
@@ -10157,6 +10661,7 @@ function renderFinalPITable() {
       <td style="font-weight:600;">${r.customerName}</td>
       <td style="font-size:12px;color:var(--ink-muted);max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${r.address||''}">${r.address||'—'}</td>
       <td style="font-size:12.5px;">${r.product}</td>
+      <td style="font-size:11.5px;color:var(--ink-muted);">${r.group||'—'}</td>
       <td style="font-size:12.5px;color:var(--ink-muted);">${r.shade||'—'}</td>
       <td style="font-size:12.5px;color:var(--ink-muted);">${r.packSize||'—'}</td>
       <td style="text-align:right;font-family:monospace;font-weight:600;">${(r.pcs||r.quantity||0).toLocaleString()}</td>
@@ -10176,6 +10681,7 @@ function deleteFinalPI(id) {
   piFinalDB = piFinalDB.filter(x => x.id !== id);
   savePiFinalDB();
   renderFinalPITable();
+  _sheetsPost('deleteFinalPI', { piId: id });   // ← Google Sheets sync (was missing entirely)
   showToast('Record removed','info');
 }
 
@@ -10349,6 +10855,7 @@ function deleteBOM(id) {
   bomDB = bomDB.filter(x => x.id !== id);
   saveBOMDB();
   renderBOMList();
+  _sheetsPost('deleteBOM', { bomId: id });   // ← Google Sheets sync (was missing entirely)
 }
 
 function renderBOMList() {
@@ -10994,6 +11501,36 @@ if (_origGeneratePI) {
     const getVal = id => document.getElementById(id)?.value || '';
     const packEl = document.getElementById('pi-pack');
     const packSizeVal = packEl ? (packEl.options[packEl.selectedIndex]?.text || packEl.value || '') : '';
+    const _wrapGroup = (document.getElementById('pi-group')?.value || '').trim();
+    // FIX: this previously only captured the primary product — any extra
+    // rows added via "+ Add Product" were silently dropped when finalizing
+    // through the "Finalize PI" button on the preview modal (as opposed to
+    // registering from the Order Register, which already collected them).
+    // Build the same _allProducts list here so every product — and its own
+    // Group — reaches the Final PI DB / Google Sheets regardless of which
+    // button the person uses to finalize.
+    const _wrapExtraRows = typeof _collectExtraRows === 'function' ? _collectExtraRows() : [];
+    const _wrapAllProducts = [
+      {
+        productName: (document.getElementById('pi-product')?.options[document.getElementById('pi-product')?.selectedIndex]?.text || getVal('pi-product-search') || ''),
+        productId: getVal('pi-product') || '',
+        shade: getVal('pi-shade') || getVal('pi-shade-group') || '',
+        packSize: packSizeVal, packSizeRef: getVal('pi-pack'),
+        qty: parseFloat(getVal('pi-qty')) || 0,
+        pcs: parseFloat(getVal('pi-qty')) || 0,
+        ltr: parseFloat(document.getElementById('total-litres')?.dataset?.ltr || 0) || 0,
+        finalRate: parseFloat((document.getElementById('final-rate-display')?.textContent || '').replace('₹ ','')) || 0,
+        totalAmount: parseFloat((document.getElementById('total-amount-display')?.textContent || '').replace(/[₹,\s]/g,'')) || 0,
+        group: _wrapGroup,
+      },
+      ..._wrapExtraRows.map(r => ({
+        productName: r.productText || '', productId: '',
+        shade: r.shade || '', packSize: r.packText || '', packSizeRef: '',
+        qty: r.qty, pcs: r.qty, ltr: r.litres || 0,
+        finalRate: r.rate || 0, totalAmount: r.amount || 0,
+        group: r.group || 'Group - Not Applicable',
+      }))
+    ];
     _lastGeneratedOrder = {
       date: fmtDateOnly(getVal('pi-date')) || fmtDateOnly(),
       clientName: getVal('pi-client-name') || getVal('pi-client'),
@@ -11021,7 +11558,8 @@ if (_origGeneratePI) {
       discTrade: parseFloat(getVal('pi-disc-trade')) || 0,
       discLoyalty: parseFloat(getVal('pi-disc-cash')) || 0,
       discCash: parseFloat(getVal('pi-disc-cash')) || 0,
-      group: getVal('pi-group'),
+      group: _wrapGroup,
+      _allProducts: _wrapAllProducts,
     };
   };
 }
@@ -11205,139 +11743,45 @@ function _getPIGroups() {
   return [];
 }
 
-// ── Get shades for selected product + group ──────────────────────────────
+// ── Get shades for the selected product ───────────────────────────────
+// NOTE: Group is now a fixed classification dropdown (Group I–VI / Other
+// Items / Not Applicable), independent of the price list's internal
+// group/zone structure — it no longer narrows which shades are offered.
+// Always scan every price-list group's shades for the product (mirrors
+// _xpGetShades(), used by the extra-row shade dropdowns).
 function _getPIShades() {
   const result = _getPIProductEntry();
   if (!result) return [];
-  const groupSel = document.getElementById('pi-group')?.value;
   const entries = result.entry;
   const shades = new Set();
-  if (groupSel && entries[groupSel]) {
-    // Shades from selected group only
-    const grp = entries[groupSel];
-    if (grp.shade) {
+  Object.values(entries).forEach(grp => {
+    if (grp && grp.shade) {
       grp.shade.split(',').map(s => s.trim()).filter(Boolean).forEach(s => shades.add(s));
     }
-    // If sub-product nested group, use sub-product names as shade hints
-    if (!grp.shade && typeof grp === 'object' && !grp.packs) {
-      Object.keys(grp).forEach(s => shades.add(s));
-    }
-  } else if (groupSel) {
-    // selectedGroup may be a sub-product key nested inside a parent group
-    for (const grpData of Object.values(entries)) {
-      if (grpData && typeof grpData === 'object' && !grpData.packs && grpData[groupSel]) {
-        const sub = grpData[groupSel];
-        if (sub && sub.shade) {
-          sub.shade.split(',').map(s => s.trim()).filter(Boolean).forEach(s => shades.add(s));
+    // Sub-product nesting: each sub-key is effectively a named shade variant
+    if (grp && typeof grp === 'object' && !grp.packs && !grp.shade) {
+      Object.entries(grp).forEach(([subKey, subData]) => {
+        shades.add(subKey);
+        if (subData && subData.shade) {
+          subData.shade.split(',').map(s => s.trim()).filter(Boolean).forEach(s => shades.add(s));
         }
-        break;
-      }
+      });
     }
-  } else {
-    // No group selected (or single-group product) → all shades
-    Object.values(entries).forEach(grp => {
-      if (grp && grp.shade) {
-        grp.shade.split(',').map(s => s.trim()).filter(Boolean).forEach(s => shades.add(s));
-      }
-      // Sub-product nesting: each sub-key is effectively a named shade variant
-      if (grp && typeof grp === 'object' && !grp.packs && !grp.shade) {
-        Object.entries(grp).forEach(([subKey, subData]) => {
-          shades.add(subKey);
-          if (subData && subData.shade) {
-            subData.shade.split(',').map(s => s.trim()).filter(Boolean).forEach(s => shades.add(s));
-          }
-        });
-      }
-    });
-  }
+  });
   return [...shades].sort();
 }
 
 // ── Update group selector when product changes ───────────────────────────
 function updatePIGroupSelector() {
   const pid = parseInt(document.getElementById('pi-product')?.value);
-  const wrap = document.getElementById('pi-group-wrap');
-  const sel  = document.getElementById('pi-group');
   const shadeInp = document.getElementById('pi-shade');
-  if (!wrap || !sel) return;
 
-  let optionHTML = '<option value="">— Select Group —</option>';
-  let hasGroups = false;
-
-  if (pid) {
-    // Try PRICE_DATA / _PLS_PRICE_DATA first (authoritative)
-    const result = _getPIProductEntry();
-    if (result && result.entry) {
-      const groupKeys = Object.keys(result.entry);
-
-      if (groupKeys.length === 1 && (groupKeys[0] === 'NA' || groupKeys[0] === '—' || groupKeys[0] === '')) {
-        // Single no-label group — auto-select it silently, don't show selector
-        sel.innerHTML = `<option value="${groupKeys[0]}" selected>${groupKeys[0]}</option>`;
-        wrap.style.display = 'none';
-      } else if (groupKeys.length >= 1) {
-        hasGroups = true;
-        groupKeys.forEach(g => {
-          const grpData = result.entry[g];
-          // Detect if this is a "named sub-product" group (no direct .packs, has sub-keys)
-          const isSubProduct = grpData && typeof grpData === 'object' && !grpData.packs;
-          const shade = grpData && grpData.shade ? grpData.shade : '';
-          const label = (g === 'NA' || g === '—' || g === '') ? 'Standard' : g;
-          if (isSubProduct) {
-            // Sub-product structure (e.g. "Other Items – Primers & Varnish")
-            // Each key IS the product name — list them as group options
-            Object.keys(grpData).forEach(subKey => {
-              const subData = grpData[subKey];
-              const subShade = subData && subData.shade ? ' — ' + subData.shade : '';
-              optionHTML += `<option value="${subKey}" data-parent="${g}" data-shades="${subData && subData.shade ? subData.shade : ''}">${subKey}${subShade}</option>`;
-            });
-          } else {
-            const shadePreview = shade ? (' — ' + shade.split(',').slice(0, 3).join(', ') + (shade.split(',').length > 3 ? '…' : '')) : '';
-            optionHTML += `<option value="${g}" data-shades="${shade}">${label}${shadePreview}</option>`;
-          }
-        });
-      }
-    }
-
-    // Fallback to priceDB if no PRICE_DATA entry found
-    if (!hasGroups && wrap.style.display !== 'none') {
-      const prod = productsDB.find(p => p.id === pid);
-      const section = prod?.type === 'fixed' ? 'fixed' : 'master';
-      const sec = (priceDB[section] || {})[pid] || priceDB.bj[pid];
-      if (sec) {
-        if (sec.groups && sec.groups.length > 0) {
-          hasGroups = true;
-          sec.groups.forEach(g => {
-            optionHTML += `<option value="${g.label}" data-shades="${g.shades||''}">${g.label}${g.shades ? ' — ' + g.shades : ''}</option>`;
-          });
-        } else if (sec.named && sec.named.length > 0) {
-          hasGroups = true;
-          // "named" = sub-product names used as groups
-          sec.named.forEach(n => {
-            const shadePreview = n.prices ? ' — ' + Object.keys(n.prices).join(', ') : '';
-            optionHTML += `<option value="${n.name}" data-shades="">${n.name}${shadePreview}</option>`;
-          });
-        } else if (sec.simple) {
-          hasGroups = true;
-          optionHTML += `<option value="Standard">Standard (All Shades)</option>`;
-        }
-      }
-    }
-  }
-
-  if (hasGroups) {
-    sel.innerHTML = optionHTML;
-    wrap.style.display = 'block';
-    // Auto-select first group so price fills immediately
-    if (sel.options.length > 1) {
-      sel.selectedIndex = 1;
-      handleGroupChange();
-    }
-  } else if (wrap.style.display !== 'none') {
-    sel.innerHTML = '<option value="">—</option>';
-    wrap.style.display = 'none';
-  }
-
-  // Clear shade and update placeholder
+  // Group is now a fixed classification dropdown (Group I–VI / Other Items
+  // / Not Applicable) — its 8 options are baked into the HTML and are
+  // never rebuilt from PRICE_DATA/priceDB anymore, and the field stays
+  // visible and mandatory regardless of which product is selected. This
+  // function's remaining job is just refreshing the shade placeholder for
+  // the newly selected product.
   if (shadeInp) {
     shadeInp.value = '';
     const shades = _getPIShades();
